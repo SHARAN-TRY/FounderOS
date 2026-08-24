@@ -23,22 +23,26 @@ import {
   User,
   Users,
   MessageSquare,
-  AlertCircle,
   CheckCircle2,
+  Zap,
   Moon,
   Sun,
   Hexagon,
   LogOut,
   Send,
-  Loader2
+  Loader2,
+  Briefcase,
+  Megaphone,
+  DollarSign,
+  Scale
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useTheme } from '../components/ThemeProvider';
 
 export function DashboardPage() {
   const { theme, setTheme } = useTheme();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState('Overview');
+  const { tabId } = useParams();
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [userName, setUserName] = useState('Founder');
   const [userPicture, setUserPicture] = useState<string | null>(null);
@@ -50,122 +54,67 @@ export function DashboardPage() {
   const [newGoalRisk, setNewGoalRisk] = useState('Low');
   const [newGoalDate, setNewGoalDate] = useState('');
 
-  const [goals, setGoals] = useState([
-    {
-      id: 1,
-      title: "Launch my startup in 30 days",
-      risk: "Medium",
-      progress: 64,
-      completedTasks: 18,
-      totalTasks: 32,
-      targetDate: "Sept 24, 2026",
-      agents: ["CEO", "Marketing", "Finance", "Legal"],
-      tasks: [
-        { id: 1, name: "Draft legal incorporation papers", status: "completed", agent: "Legal" },
-        { id: 2, name: "Establish Q3 marketing outline & budget", status: "completed", agent: "Finance" },
-        { id: 3, name: "A/B test landing page headline variants", status: "running", agent: "Marketing" },
-        { id: 4, name: "Schedule public launch press release", status: "pending", agent: "CEO" }
-      ]
-    },
-    {
-      id: 2,
-      title: "Double ARR by Q3",
-      risk: "Low",
-      progress: 35,
-      completedTasks: 7,
-      totalTasks: 20,
-      targetDate: "Oct 15, 2026",
-      agents: ["CEO", "Sales", "Finance"],
-      tasks: [
-        { id: 1, name: "Map outbound sales workflow pipeline", status: "completed", agent: "CEO" },
-        { id: 2, name: "Launch automated cold outreach campaigns", status: "running", agent: "Sales" },
-        { id: 3, name: "Perform audit on customer acquisition costs", status: "pending", agent: "Finance" }
-      ]
-    },
-    {
-      id: 3,
-      title: "Automate Customer Support",
-      risk: "Low",
-      progress: 90,
-      completedTasks: 9,
-      totalTasks: 10,
-      targetDate: "Sept 10, 2026",
-      agents: ["CEO", "Legal", "Compliance"],
-      tasks: [
-        { id: 1, name: "Integrate knowledge base into support agent", status: "completed", agent: "CEO" },
-        { id: 2, name: "Establish fallback protocol to humans", status: "completed", agent: "Legal" },
-        { id: 3, name: "Review privacy compliance logs", status: "running", agent: "Compliance" }
-      ]
-    },
-    {
-      id: 4,
-      title: "Complete compliance audit",
-      risk: "High",
-      progress: 10,
-      completedTasks: 1,
-      totalTasks: 10,
-      targetDate: "Sept 30, 2026",
-      agents: ["Legal", "Compliance"],
-      tasks: [
-        { id: 1, name: "Collate compliance reports", status: "completed", agent: "Compliance" },
-        { id: 2, name: "Draft certification papers", status: "running", agent: "Legal" }
-      ]
-    }
-  ]);
+  const [goals, setGoals] = useState<any[]>([]);
+
+  // Sidebar tab states
+  const [isAgentsOpen, setIsAgentsOpen] = useState(false);
 
   // Tasks tab states
   const [taskInput, setTaskInput] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisLogs, setAnalysisLogs] = useState<string[]>([]);
-  const [selectedTaskId, setSelectedTaskId] = useState<number | null>(null);
-  const [tasksList, setTasksList] = useState([
-    {
-      id: 1,
-      title: "Hire a manager and launch ad campaign",
-      status: "completed",
-      date: "Aug 24, 2026",
-      delegations: [
-        { agent: "CEO", task: "Analyze goals and structure milestones", status: "completed" },
-        { agent: "Hiring", task: "Draft job listing for marketing manager", status: "completed" },
-        { agent: "Marketing", task: "Initialize Facebook & Google ad campaigns", status: "completed" }
-      ]
-    }
-  ]);
+  const [, setAnalysisLogs] = useState<string[]>([]);
+  const [, setSelectedTaskId] = useState<number | null>(null);
+  const [tasksList, setTasksList] = useState<any[]>([]);
+  const [liveActivity, setLiveActivity] = useState<any[]>([]);
+  const [isExecutingAgents, setIsExecutingAgents] = useState(false);
 
-  const handleCreateGoal = (e: React.FormEvent) => {
+  const handleCreateGoal = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newGoalTitle || !newGoalDate) return;
 
-    const newGoal = {
-      id: Date.now(),
-      title: newGoalTitle,
-      risk: newGoalRisk,
-      progress: 0,
-      completedTasks: 0,
-      totalTasks: 5,
-      targetDate: newGoalDate,
-      agents: ["CEO"],
-      tasks: [
-        { id: 1, name: "Initialize workspace core structures", status: "running", agent: "CEO" }
-      ]
-    };
+    const token = localStorage.getItem('token');
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-    setGoals([...goals, newGoal]);
-    setNewGoalTitle('');
-    setNewGoalRisk('Low');
-    setNewGoalDate('');
-    setShowNewGoalModal(false);
+    try {
+      const response = await fetch(`${apiUrl}/api/goals`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          title: newGoalTitle,
+          risk: newGoalRisk,
+          target_date: newGoalDate
+        }),
+      });
+
+      if (response.ok) {
+        const newGoal = await response.json();
+        // Since the backend might not return agents array initially, we map it.
+        setGoals([...goals, { ...newGoal, agents: [], tasks: [] }]);
+        setNewGoalTitle('');
+        setNewGoalRisk('Low');
+        setNewGoalDate('');
+        setShowNewGoalModal(false);
+      }
+    } catch (err) {
+      console.error('Failed to create goal:', err);
+    }
   };
 
-  const handleTaskSubmit = (e: React.FormEvent) => {
+  const handleTaskSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!taskInput.trim() || isAnalyzing) return;
 
+    setActiveTab('CEO Agent');
     setIsAnalyzing(true);
     setAnalysisLogs([]);
     setSelectedTaskId(null);
 
-    // Simulate logs with timeouts
+    const token = localStorage.getItem('token');
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
     const logs = [
       "[CEO Agent] Parsing business objective...",
       "[CEO Agent] Identifying task dependencies...",
@@ -174,60 +123,89 @@ export function DashboardPage() {
       "[CEO Agent] Tasks successfully delegated! Dispatching..."
     ];
 
-    logs.forEach((log, index) => {
-      setTimeout(() => {
-        setAnalysisLogs(prev => [...prev, log]);
-        
-        // Final step: Add task to list and reset state
-        if (index === logs.length - 1) {
-          setTimeout(() => {
-            const inputLower = taskInput.toLowerCase();
-            const delegations = [
-              { agent: "CEO", task: "Evaluate and map sub-task directives", status: "completed" }
-            ];
+    try {
+      const now = new Date();
+      const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      
+      const taskRes = await fetch(`${apiUrl}/api/tasks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          title: taskInput,
+          date: dateStr,
+          status: "running"
+        })
+      });
 
-            if (inputLower.includes("hire") || inputLower.includes("recruiting") || inputLower.includes("talent") || inputLower.includes("hiring") || inputLower.includes("manager") || inputLower.includes("engineer")) {
-              delegations.push({ agent: "Hiring", task: "Source applicants and draft role requirements", status: "running" });
-            }
-            if (inputLower.includes("money") || inputLower.includes("budget") || inputLower.includes("finance") || inputLower.includes("cost") || inputLower.includes("reconcile")) {
-              delegations.push({ agent: "Finance", task: "Perform CA/LTV audits and allocate budget bounds", status: "running" });
-            }
-            if (inputLower.includes("marketing") || inputLower.includes("ads") || inputLower.includes("seo") || inputLower.includes("sales") || inputLower.includes("outreach") || inputLower.includes("product")) {
-              delegations.push({ agent: "Marketing", task: "Deploy ad templates and schedule social media outreach", status: "running" });
-            }
-            if (inputLower.includes("legal") || inputLower.includes("contract") || inputLower.includes("terms") || inputLower.includes("agreements") || inputLower.includes("compliance")) {
-              delegations.push({ agent: "Legal", task: "Review compliance papers and run standard contract risk check", status: "running" });
-            }
+      if (!taskRes.ok) throw new Error("Failed to create task");
+      const createdTask = await taskRes.json();
+      
+      // Simulate logs sequentially
+      for (let i = 0; i < logs.length; i++) {
+        await new Promise(r => setTimeout(r, 800));
+        setAnalysisLogs(prev => [...prev, logs[i]]);
+      }
 
-            // Fallback delegation if no keywords match
-            if (delegations.length === 1) {
-              delegations.push({ agent: "Marketing", task: "Conduct initial market interest survey", status: "running" });
-              delegations.push({ agent: "Finance", task: "Verify workspace cost structure constraints", status: "running" });
-            }
-
-            const now = new Date();
-            const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-
-            const newTask = {
-              id: Date.now(),
-              title: taskInput,
-              status: "running",
-              date: dateStr,
-              delegations
-            };
-
-            setTasksList(prev => [newTask, ...prev]);
-            setTaskInput('');
-            setIsAnalyzing(false);
-            setAnalysisLogs([]);
-            setSelectedTaskId(newTask.id); // auto-expand the new task
-          }, 1000);
-        }
-      }, (index + 1) * 800);
-    });
+      const analyzeRes = await fetch(`${apiUrl}/api/tasks/${createdTask.id}/analyze`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      if (analyzeRes.ok) {
+        const analyzedTask = await analyzeRes.json();
+        setTasksList(prev => [analyzedTask, ...prev]);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setTaskInput('');
+      setIsAnalyzing(false);
+      // Let it remain on the screen, or clear it if needed.
+    }
   };
 
   useEffect(() => {
+    const fetchDashboardData = async () => {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        navigate('/auth?mode=login');
+        return;
+      }
+      
+      try {
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+        const res = await fetch(`${apiUrl}/api/dashboard`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        
+        if (res.status === 401) {
+           navigate('/auth?mode=login');
+           return;
+        }
+
+        if (res.ok) {
+          const data = await res.json();
+          // We map data to include agents arrays for the UI if missing
+          setGoals(data.goals.map((g: any) => ({...g, agents: g.agents || ["CEO"], targetDate: g.target_date})));
+          setTasksList(data.tasks);
+          setLiveActivity(data.activities.map((a: any) => ({
+            agent: a.agent_name,
+            action: a.action,
+            time: a.time,
+            bg: a.bg_color,
+            icon: <Bot size={14} className={a.icon_type === 'alert' ? 'text-amber-500' : 'text-[#8B5CF6]'} />
+          })));
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    
+    fetchDashboardData();
+
     const storedUser = localStorage.getItem('user');
     if (storedUser) {
       try {
@@ -238,7 +216,7 @@ export function DashboardPage() {
         console.error(e);
       }
     }
-  }, []);
+  }, [navigate]);
 
   const getInitials = (name: string) => {
     const parts = name.trim().split(/\s+/);
@@ -249,10 +227,20 @@ export function DashboardPage() {
   };
 
   const sidebarItems = [
-    { name: 'Overview', icon: <LayoutDashboard size={18} /> },
+    { name: 'Dashboard', icon: <LayoutDashboard size={18} /> },
     { name: 'Goals', icon: <Target size={18} /> },
     { name: 'Tasks', icon: <ClipboardList size={18} /> },
-    { name: 'AI Team', icon: <Bot size={18} /> },
+    { 
+      name: 'Agents', 
+      isSection: true,
+      subItems: [
+        { name: 'CEO Agent', icon: <Briefcase size={16} /> },
+        { name: 'Hiring Agent', icon: <Users size={16} /> },
+        { name: 'Marketing Agent', icon: <Megaphone size={16} /> },
+        { name: 'Finance Agent', icon: <DollarSign size={16} /> },
+        { name: 'Legal Agent', icon: <Scale size={16} /> }
+      ]
+    },
     { name: 'Workflow', icon: <GitBranch size={18} /> },
     { name: 'Memory', icon: <Cpu size={18} /> },
     { name: 'Approvals', icon: <CheckSquare size={18} /> },
@@ -261,6 +249,19 @@ export function DashboardPage() {
     { name: 'Audit Logs', icon: <FileText size={18} /> },
     { name: 'Integrations', icon: <LinkIcon size={18} /> },
   ];
+
+  const allNames = sidebarItems.reduce((acc: string[], item: any) => {
+    if (item.name !== 'Agents') acc.push(item.name);
+    if (item.subItems) item.subItems.forEach((sub: any) => acc.push(sub.name));
+    return acc;
+  }, []);
+
+  const activeTabMatch = tabId ? allNames.find(n => n.toLowerCase().replace(/\s+/g, '-') === tabId) : undefined;
+  const activeTab = activeTabMatch || 'Dashboard';
+  
+  const setActiveTab = (tabName: string) => {
+    navigate(`/dashboard/${tabName.toLowerCase().replace(/\s+/g, '-')}`);
+  };
 
   const metrics = [
     { title: "ACTIVE GOALS", value: goals.length.toString() },
@@ -279,10 +280,8 @@ export function DashboardPage() {
     { name: "Legal", progress: 90, color: "bg-gray-300 dark:bg-gray-400" }
   ];
 
-  const liveActivity = [
-    { agent: "CEO Agent", action: "Created execution plan.", time: "Just now", icon: <User size={14} className="text-[#8B5CF6]" />, bg: "bg-[#8B5CF6]/10" },
-    { agent: "Finance Agent", action: "Flagged budget conflict.", time: "2 mins ago", icon: <AlertCircle size={14} className="text-amber-500" />, bg: "bg-amber-500/10" },
-    { agent: "CEO Agent", action: "approved Task #402.", time: "15 mins ago", icon: <CheckCircle2 size={14} className="text-[#00DF89]" />, bg: "bg-[#00DF89]/10" }
+  const liveActivityRender = liveActivity.length > 0 ? liveActivity : [
+    { agent: "CEO Agent", action: "Waiting for tasks...", time: "Just now", icon: <User size={14} className="text-[#8B5CF6]" />, bg: "bg-[#8B5CF6]/10" }
   ];
 
   const workflowSteps = [
@@ -314,6 +313,51 @@ export function DashboardPage() {
         {/* Sidebar Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1 scrollbar-thin">
           {sidebarItems.map((item) => {
+            if (item.isSection && item.subItems) {
+              return (
+                <div key={item.name} className="pt-4 pb-1">
+                  <button 
+                    onClick={() => setIsAgentsOpen(!isAgentsOpen)}
+                    className="w-full px-4 mb-2 flex items-center justify-between text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors group"
+                  >
+                    <div className="text-[11px] font-bold uppercase tracking-widest flex items-center gap-2">
+                      <Bot size={14} />
+                      {item.name}
+                    </div>
+                    <ChevronDown size={14} className={`transition-transform duration-200 ${isAgentsOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  <AnimatePresence>
+                    {isAgentsOpen && (
+                      <motion.div 
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="space-y-0.5 overflow-hidden"
+                      >
+                        {item.subItems.map((sub) => {
+                          const isSelected = activeTab === sub.name;
+                          return (
+                            <button
+                              key={sub.name}
+                              onClick={() => setActiveTab(sub.name)}
+                              className={`flex w-full items-center gap-3 px-4 py-2 text-sm font-medium rounded-xl transition-all ${
+                                isSelected
+                                  ? 'bg-[#00DF89]/10 text-[#00DF89] dark:bg-[#00DF89]/15'
+                                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#1C162E] hover:text-gray-900 dark:hover:text-white'
+                              }`}
+                            >
+                              <div className="w-5 flex justify-center opacity-70">{sub.icon}</div>
+                              {sub.name}
+                            </button>
+                          )
+                        })}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            }
+
             const isSelected = activeTab === item.name;
             return (
               <button
@@ -325,7 +369,7 @@ export function DashboardPage() {
                     : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#1C162E] hover:text-gray-900 dark:hover:text-white'
                 }`}
               >
-                {item.icon}
+                {item.icon && <div className="w-5 flex justify-center">{item.icon}</div>}
                 {item.name}
               </button>
             );
@@ -453,8 +497,8 @@ export function DashboardPage() {
         {/* Dashboard Panels Scroll Area */}
         <main className="flex-grow overflow-y-auto p-8 space-y-8 bg-gray-50 dark:bg-[#0B0813] transition-colors duration-300">
           
-          {/* Overview Panel */}
-          {activeTab === 'Overview' && (
+          {/* Dashboard Panel */}
+          {activeTab === 'Dashboard' && (
             <motion.div
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
@@ -595,7 +639,7 @@ export function DashboardPage() {
 
                     {/* Timeline flow */}
                     <div className="space-y-6 relative before:absolute before:left-3.5 before:top-2 before:bottom-2 before:w-[2px] before:bg-gray-200 dark:before:bg-[#1D162E]">
-                      {liveActivity.map((activity, idx) => (
+                      {liveActivityRender.map((activity, idx) => (
                         <div key={idx} className="flex gap-4 relative">
                           <div className={`w-7 h-7 rounded-full flex items-center justify-center border border-gray-200 dark:border-[#251B38] ${activity.bg} shrink-0 z-10 bg-white dark:bg-[#120E1E]`}>
                             {activity.icon}
@@ -690,7 +734,7 @@ export function DashboardPage() {
                       <div className="mt-4 flex items-center gap-1.5 border-t border-gray-100 dark:border-[#251B38]/30 pt-4">
                         <span className="text-[10px] font-bold text-gray-400 dark:text-founder-textMuted mr-1">DELEGATED AGENTS:</span>
                         <div className="flex -space-x-1.5 overflow-hidden">
-                          {goal.agents.map((agent, i) => (
+                          {goal.agents.map((agent: string, i: number) => (
                             <div 
                               key={i} 
                               className="w-6 h-6 rounded-full bg-founder-primary/20 border border-founder-primary/40 flex items-center justify-center font-extrabold text-[9px] text-founder-primary"
@@ -715,7 +759,7 @@ export function DashboardPage() {
                           >
                             <p className="text-xs font-bold text-gray-400 dark:text-founder-textMuted">GOAL EXECUTION TASKS</p>
                             <div className="space-y-2">
-                              {goal.tasks.map((task) => (
+                              {(goal.tasks || []).map((task: any) => (
                                 <div 
                                   key={task.id} 
                                   className="flex items-center justify-between p-2.5 rounded-lg bg-gray-50/50 dark:bg-[#130B24]/40 border border-gray-100 dark:border-[#251B38]/30 text-xs"
@@ -728,10 +772,10 @@ export function DashboardPage() {
                                           ? 'bg-[#3B82F6] animate-pulse' 
                                           : 'bg-gray-400'
                                     }`} />
-                                    <span className="font-semibold text-gray-800 dark:text-gray-200">{task.name}</span>
+                                    <span className="font-semibold text-gray-800 dark:text-gray-200">{task.title || task.name}</span>
                                   </div>
                                   <span className="px-2 py-0.5 rounded bg-founder-primary/10 text-founder-primary text-[9px] font-bold">
-                                    {task.agent} Agent
+                                    {task.title || task.name} 
                                   </span>
                                 </div>
                               ))}
@@ -754,26 +798,25 @@ export function DashboardPage() {
               exit={{ opacity: 0, y: -15 }}
               className="space-y-6"
             >
-              <div>
-                <h2 className="text-2xl font-bold tracking-tight">AI Task Orchestrator</h2>
-                <p className="text-sm text-gray-500 dark:text-founder-textMuted mt-1">delegate business tasks to the CEO Agent for dynamic resource analysis & department delegation.</p>
+              <div className="space-y-6 text-center">
+                <h2 className="text-2xl font-bold tracking-tight">Please enter the task</h2>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
-                {/* Left side: Task submission & Terminal Analysis */}
-                <div className="lg:col-span-2 space-y-6">
+              <div className="flex flex-col gap-10 w-full mt-8">
+                {/* Top side: Task submission & Terminal Analysis */}
+                <div className="w-full space-y-6">
                   <div className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-2xl p-6 space-y-4">
-                    <h3 className="text-base font-bold">Delegate Task</h3>
-                    <form onSubmit={handleTaskSubmit} className="space-y-4">
-                      <div className="space-y-1.5">
-                        <label htmlFor="taskText" className="block text-xs font-semibold text-gray-400 dark:text-founder-textMuted uppercase tracking-wider">Describe task details</label>
+                    <h3 className="text-base font-bold text-left">Delegate Task</h3>
+                    <form onSubmit={handleTaskSubmit} className="space-y-4 w-full flex flex-col">
+                      <div className="space-y-1.5 w-full text-left">
+                        <label htmlFor="taskText" className="block text-xs font-semibold text-gray-400 dark:text-founder-textMuted uppercase tracking-wider text-left">Enter a task</label>
                         <textarea 
                           id="taskText" 
                           rows={4}
                           value={taskInput}
                           onChange={(e) => setTaskInput(e.target.value)}
                           disabled={isAnalyzing}
-                          className="w-full px-4 py-3 bg-gray-50/50 dark:bg-founder-dark/40 border border-gray-200 dark:border-founder-border rounded-xl text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-founder-primary focus:border-transparent outline-none transition-colors resize-none"
+                          className="w-full px-4 py-3 bg-gray-50/50 dark:bg-founder-dark/40 border border-gray-200 dark:border-founder-border rounded-xl text-sm text-gray-900 dark:text-white focus:ring-2 focus:ring-founder-primary focus:border-transparent outline-none transition-colors resize-none text-left"
                           placeholder="e.g., We need to hire a frontend engineer, define compensation budget rules, and review legal SaaS contracts..."
                         />
                       </div>
@@ -781,7 +824,7 @@ export function DashboardPage() {
                       <button 
                         type="submit" 
                         disabled={isAnalyzing || !taskInput.trim()}
-                        className="w-full bg-[#8B5CF6] hover:bg-[#7C3AED] disabled:bg-gray-400 disabled:dark:bg-[#1C162E] disabled:text-gray-400 text-white font-bold py-3 rounded-xl text-sm flex items-center justify-center gap-2 transition-colors shadow-lg shadow-[#8B5CF6]/20"
+                        className="w-auto px-8 bg-[#8B5CF6] hover:bg-[#7C3AED] disabled:bg-gray-400 disabled:dark:bg-[#1C162E] disabled:text-gray-400 text-white font-bold py-3 rounded-xl text-sm flex items-center justify-center gap-2 transition-colors shadow-lg shadow-[#8B5CF6]/20 mx-auto"
                       >
                         {isAnalyzing ? (
                           <>
@@ -797,118 +840,311 @@ export function DashboardPage() {
                       </button>
                     </form>
                   </div>
-
-                  {/* Terminal Simulation */}
-                  <AnimatePresence>
-                    {(isAnalyzing || analysisLogs.length > 0) && (
-                      <motion.div 
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 10 }}
-                        className="bg-[#090610] border border-[#231A36] rounded-2xl p-5 shadow-2xl h-[240px] flex flex-col justify-between"
-                      >
-                        <div className="flex items-center justify-between border-b border-[#231A36]/50 pb-2 mb-3">
-                          <span className="text-[10px] font-bold text-gray-500 uppercase tracking-widest flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 bg-red-500 rounded-full" />
-                            <span className="w-1.5 h-1.5 bg-yellow-500 rounded-full" />
-                            <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />
-                            CEO TERMINAL LOGS
-                          </span>
-                          <span className="text-[9px] font-bold bg-[#00DF89]/10 text-[#00DF89] px-2 py-0.5 rounded">AUTO</span>
-                        </div>
-                        <div className="flex-grow overflow-y-auto space-y-2 font-mono text-xs text-[#00DF89] pr-1 scrollbar-none">
-                          {analysisLogs.map((log, i) => (
-                            <motion.div 
-                              key={i}
-                              initial={{ opacity: 0, x: -10 }}
-                              animate={{ opacity: 1, x: 0 }}
-                              transition={{ duration: 0.2 }}
-                              className="leading-relaxed"
-                            >
-                              {log}
-                            </motion.div>
-                          ))}
-                          {isAnalyzing && (
-                            <span className="inline-block w-1.5 h-3.5 bg-[#00DF89] ml-1 animate-[ping_1s_infinite]" />
-                          )}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
-                {/* Right side: Tasks list and Delegated details */}
-                <div className="lg:col-span-3 space-y-4">
-                  <h3 className="text-base font-bold">Delegated Tasks</h3>
-                  <div className="space-y-4">
-                    {tasksList.map((task) => {
-                      const isSelected = selectedTaskId === task.id;
-                      return (
-                        <div 
-                          key={task.id}
-                          className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-2xl p-5 hover:border-[#2D234A] transition-colors cursor-pointer"
-                          onClick={() => setSelectedTaskId(isSelected ? null : task.id)}
-                        >
-                          <div className="flex items-start justify-between">
-                            <div className="space-y-1.5">
-                              <h4 className="font-bold text-gray-900 dark:text-white text-base">{task.title}</h4>
-                              <p className="text-xs text-gray-400 dark:text-founder-textMuted">Created on: {task.date}</p>
-                            </div>
-                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                              task.status === 'completed'
-                                ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-500'
-                                : 'bg-[#3B82F6]/10 border border-[#3B82F6]/30 text-[#3B82F6] animate-pulse'
-                            }`}>
-                              {task.status.toUpperCase()}
-                            </span>
-                          </div>
-
-                          <AnimatePresence>
-                            {isSelected && (
-                              <motion.div 
-                                initial={{ height: 0, opacity: 0 }}
-                                animate={{ height: 'auto', opacity: 1 }}
-                                exit={{ height: 0, opacity: 0 }}
-                                className="mt-5 border-t border-gray-100 dark:border-[#251B38]/30 pt-4 space-y-4"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <h5 className="text-xs font-bold text-gray-400 dark:text-founder-textMuted tracking-wider">CEO DELEGATION SCHEDULING</h5>
-                                <div className="space-y-3 relative before:absolute before:left-3 before:top-2 before:bottom-2 before:w-[1px] before:border-l before:border-dashed before:border-gray-300 dark:before:border-[#251B38]">
-                                  {task.delegations.map((del, i) => (
-                                    <div key={i} className="flex gap-4 relative z-10 bg-white dark:bg-[#120E1E]">
-                                      <div className={`w-6.5 h-6.5 rounded-full flex items-center justify-center text-[10px] font-bold border shrink-0 ${
-                                        del.status === 'completed' 
-                                          ? 'bg-emerald-500/15 border-emerald-500 text-emerald-500'
-                                          : 'bg-founder-primary/20 border-founder-primary text-founder-primary animate-pulse'
-                                      }`}>
-                                        {del.agent.slice(0, 2).toUpperCase()}
-                                      </div>
-                                      <div className="space-y-0.5">
-                                        <p className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
-                                          <span>{del.agent} Agent</span>
-                                          <span className={`w-1.5 h-1.5 rounded-full ${
-                                            del.status === 'completed' ? 'bg-emerald-500' : 'bg-founder-primary animate-ping'
-                                          }`} />
-                                        </p>
-                                        <p className="text-xs text-gray-500 dark:text-founder-textMuted">{del.task}</p>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </motion.div>
-                            )}
-                          </AnimatePresence>
-                        </div>
-                      );
-                    })}
-                  </div>
                 </div>
               </div>
             </motion.div>
           )}
 
+          {/* CEO Agent Panel */}
+          {activeTab === 'CEO Agent' && (
+            <motion.div
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              className="space-y-6 pb-12"
+            >
+              <div className="flex flex-col gap-10 w-full mt-4">
+                
+                {tasksList.length === 0 ? (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="flex flex-col items-center justify-center p-16 border border-dashed border-gray-200 dark:border-[#251B38] rounded-2xl bg-white/50 dark:bg-[#120E1E]/50 text-center mt-8"
+                  >
+                    <div className="w-16 h-16 bg-founder-primary/20 text-founder-primary rounded-full flex items-center justify-center mb-6">
+                      <Briefcase size={32} />
+                    </div>
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">CEO Agent is on standby</h3>
+                    <p className="text-gray-500 dark:text-founder-textMuted max-w-md mx-auto mb-6">
+                      Your CEO Agent is waiting for instructions. Head over to the Tasks tab to delegate a new objective, and watch the AI workforce execute it.
+                    </p>
+                    <button 
+                      onClick={() => setActiveTab('Tasks')}
+                      className="px-6 py-2.5 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-bold rounded-xl text-sm flex items-center gap-2 transition-colors shadow-lg shadow-[#8B5CF6]/20"
+                    >
+                      <Plus size={16} />
+                      Delegate New Task
+                    </button>
+                  </motion.div>
+                ) : (
+                  (() => {
+                    const latestTask = tasksList[0];
+                    const getAgentConfig = (agentName: string) => {
+                      if (agentName.includes('Hiring')) return { icon: Users, color: 'text-emerald-500', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', badge: 'bg-emerald-500/20 text-emerald-500', fill: '#10B981' };
+                      if (agentName.includes('Marketing')) return { icon: Megaphone, color: 'text-[#8B5CF6]', bg: 'bg-[#8B5CF6]/10', border: 'border-[#8B5CF6]/30', badge: 'bg-[#8B5CF6]/20 text-[#8B5CF6]', fill: '#8B5CF6' };
+                      if (agentName.includes('Finance')) return { icon: DollarSign, color: 'text-[#3B82F6]', bg: 'bg-[#3B82F6]/10', border: 'border-[#3B82F6]/30', badge: 'bg-[#3B82F6]/20 text-[#3B82F6]', fill: '#3B82F6' };
+                      if (agentName.includes('Legal')) return { icon: Scale, color: 'text-amber-500', bg: 'bg-amber-500/10', border: 'border-amber-500/30', badge: 'bg-amber-500/20 text-amber-500', fill: '#F59E0B' };
+                      return { icon: Bot, color: 'text-gray-400', bg: 'bg-gray-400/10', border: 'border-gray-400/30', badge: 'bg-gray-400/20 text-gray-400', fill: '#9CA3AF' };
+                    };
+
+                    return (
+                      <div className="w-full">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                          <div>
+                            <h2 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">CEO Agent Delegations</h2>
+                            <p className="text-gray-500 dark:text-founder-textMuted text-sm mt-1">CEO Agent is analyzing your request and delegating to specialized agents</p>
+                          </div>
+                          <div className="bg-emerald-500/10 text-emerald-500 px-3 py-1.5 rounded-full text-[10px] font-bold border border-emerald-500/30 flex items-center gap-2 self-start sm:self-auto">
+                            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                            RUNNING
+                          </div>
+                        </div>
+
+                        {/* Founder Request */}
+                        <div className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 shadow-sm">
+                          <div className="flex items-center gap-5">
+                             <div className="w-12 h-12 bg-founder-primary/10 rounded-full flex items-center justify-center text-founder-primary shrink-0 border border-founder-primary/20">
+                               <User size={24} />
+                             </div>
+                             <div>
+                               <p className="text-[10px] text-gray-500 dark:text-founder-textMuted font-bold uppercase tracking-widest mb-1">Founder Request</p>
+                               <p className="text-gray-900 dark:text-white text-lg font-medium leading-tight">{latestTask.title}</p>
+                               <p className="text-[10px] text-gray-400 dark:text-founder-textMuted mt-1.5">Created on: {latestTask.date} • {new Date(latestTask.created_at || Date.now()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                             </div>
+                          </div>
+                          <button className="border border-gray-200 dark:border-[#251B38] bg-transparent hover:bg-gray-50 dark:hover:bg-[#1C162E] text-gray-600 dark:text-gray-300 px-5 py-2 rounded-xl text-xs font-semibold transition-colors shrink-0 self-start sm:self-auto">
+                            View Details
+                          </button>
+                        </div>
+
+                        {/* Analysis & Decision */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                          <div className="lg:col-span-2 bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-2xl p-6 shadow-sm">
+                             <h3 className="text-gray-900 dark:text-white font-bold flex items-center gap-2 mb-5 text-sm">
+                               <Activity size={16} className="text-amber-500" /> CEO Agent Analysis
+                             </h3>
+                             <ul className="space-y-3.5">
+                               <li className="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-300 font-medium">
+                                 <CheckCircle2 size={16} className="text-emerald-500 shrink-0" /> Understanding the objective of the request
+                               </li>
+                               <li className="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-300 font-medium">
+                                 <CheckCircle2 size={16} className="text-emerald-500 shrink-0" /> Breaking down into key business requirements
+                               </li>
+                               <li className="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-300 font-medium">
+                                 <CheckCircle2 size={16} className="text-emerald-500 shrink-0" /> Identifying required departments and expertise
+                               </li>
+                               <li className="flex items-center gap-3 text-sm text-gray-700 dark:text-gray-300 font-medium">
+                                 <CheckCircle2 size={16} className="text-emerald-500 shrink-0" /> Delegating tasks to specialized agents
+                                 {latestTask.status === 'running' && <Loader2 size={14} className="animate-spin text-founder-primary ml-1" />}
+                               </li>
+                             </ul>
+                          </div>
+                          <div className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-2xl p-6 flex flex-col justify-center shadow-sm">
+                            <h3 className="font-bold mb-5 text-sm text-founder-primary">CEO Agent Decision</h3>
+                            <div className="flex items-start gap-4">
+                              <div className="w-12 h-12 bg-founder-primary/10 rounded-2xl flex items-center justify-center text-founder-primary shrink-0 border border-founder-primary/20">
+                                <Cpu size={24} />
+                              </div>
+                              <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed font-medium">
+                                To achieve this objective, I will coordinate with the following departments and agents.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Flowchart */}
+                        <div className="mb-10 w-full overflow-x-auto pb-4">
+                          <div className="min-w-[900px]">
+                            <h3 className="text-center text-founder-primary font-bold mb-6 text-sm">CEO Agent Delegation Flow</h3>
+                            
+                            {/* Root */}
+                            <div className="flex justify-center relative">
+                              <div className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-founder-primary/50 rounded-2xl p-4 flex items-center gap-4 w-72 z-10 relative shadow-[0_0_20px_rgba(139,92,246,0.1)]">
+                                 <div className="w-10 h-10 bg-founder-primary/10 rounded-full flex items-center justify-center text-founder-primary border border-founder-primary/20">
+                                   <Bot size={20} />
+                                 </div>
+                                 <div>
+                                   <p className="font-bold text-gray-900 dark:text-white">CEO Agent</p>
+                                   <p className="text-[10px] text-gray-500 dark:text-founder-textMuted uppercase tracking-wider mt-0.5">Strategic Analysis & Delegation</p>
+                                 </div>
+                              </div>
+                              {/* vertical line down */}
+                              <div className="absolute top-full left-1/2 -translate-x-1/2 w-[2px] h-6 bg-founder-primary/40"></div>
+                            </div>
+                            
+                            {/* Branches */}
+                            <div className="relative mt-6 px-4">
+                              {/* Horizontal Line spanning the grid, stopping at the middle of the first and last columns */}
+                              <div className="absolute top-0 left-[12.5%] right-[12.5%] h-[2px] bg-founder-primary/40"></div>
+                              <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-gray-50 dark:bg-[#0B0813] px-3 py-1 text-[9px] font-bold text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-[#251B38] rounded-full z-10 uppercase tracking-widest">Delegates to</div>
+                              
+                              <div className="grid grid-cols-4 gap-6 pt-6">
+                                 {latestTask.delegations.map((del: any, idx: number) => {
+                                   const config = getAgentConfig(del.agent);
+                                   const Icon = config.icon;
+                                   return (
+                                     <div key={idx} className="relative">
+                                       {/* Vertical line from horizontal line to card */}
+                                       <div className="absolute -top-6 left-1/2 -translate-x-1/2 w-[2px] h-6" style={{ backgroundColor: config.fill + '60' }}></div>
+                                       {/* Arrow head */}
+                                       <div className="absolute -top-[5px] left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 border-b-2 border-r-2 rotate-45" style={{ borderColor: config.fill + '60' }}></div>
+
+                                       <div className={`bg-white dark:bg-[#120E1E] border rounded-2xl p-5 h-full flex flex-col transition-colors shadow-sm`} style={{ borderColor: config.fill + '40' }}>
+                                         <div className="flex items-center gap-3 mb-4 border-b border-gray-100 dark:border-[#251B38]/50 pb-4">
+                                           <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 border ${config.bg} ${config.color}`} style={{ borderColor: config.fill + '40' }}>
+                                             <Icon size={18} />
+                                           </div>
+                                           <div>
+                                             <p className="font-bold text-gray-900 dark:text-white text-sm">{del.agent} Agent</p>
+                                             <p className="text-[10px] text-gray-500 dark:text-founder-textMuted">{
+                                               del.agent.includes('Hiring') ? 'Talent & Recruitment' :
+                                               del.agent.includes('Marketing') ? 'Growth & Outreach' :
+                                               del.agent.includes('Finance') ? 'Budget & Financial Planning' :
+                                               'Compliance & Legal Review'
+                                             }</p>
+                                           </div>
+                                         </div>
+                                         <div className="flex-1 space-y-4">
+                                           <div>
+                                             <p className="text-[10px] font-bold text-gray-400 dark:text-founder-textMuted uppercase mb-1.5">Order / Task</p>
+                                             <div className="flex items-start gap-2">
+                                               <span className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ backgroundColor: config.fill }}></span>
+                                               <p className="text-xs text-gray-700 dark:text-gray-300 font-medium leading-relaxed">{del.task_description || del.task}</p>
+                                             </div>
+                                           </div>
+                                           <div>
+                                             <p className="text-[10px] font-bold text-gray-400 dark:text-founder-textMuted uppercase mb-1.5">Priority</p>
+                                             <div className="flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 font-medium">
+                                               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: config.fill }}></span>
+                                               {del.agent.includes('Marketing') ? 'High' : 'Medium'}
+                                             </div>
+                                           </div>
+                                         </div>
+                                         <div className="mt-5 pt-4 border-t border-gray-100 dark:border-[#251B38]/50 flex justify-center">
+                                            <span className={`px-4 py-1.5 rounded-full text-[10px] font-bold ${config.badge} flex items-center gap-1.5`}>
+                                              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: config.fill }}></span>
+                                              IN PROGRESS
+                                            </span>
+                                         </div>
+                                       </div>
+                                     </div>
+                                   );
+                                 })}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Bottom section */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                          <div className="lg:col-span-2 bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-2xl p-6 shadow-sm">
+                            <h3 className="text-gray-900 dark:text-white font-bold flex items-center gap-2 mb-5 text-sm">
+                               <Zap size={16} className="text-founder-primary" /> Real-time CEO Agent Activity
+                            </h3>
+                            <div className="space-y-3 font-mono text-xs">
+                               <div className="flex gap-6">
+                                 <span className="text-gray-400 dark:text-founder-textMuted w-24">10:45:12 AM</span>
+                                 <span className="text-gray-700 dark:text-gray-300">Request received from Founder</span>
+                               </div>
+                               <div className="flex gap-6">
+                                 <span className="text-gray-400 dark:text-founder-textMuted w-24">10:45:15 AM</span>
+                                 <span className="text-gray-700 dark:text-gray-300">Analyzing objective and breaking down requirements</span>
+                               </div>
+                               <div className="flex gap-6">
+                                 <span className="text-gray-400 dark:text-founder-textMuted w-24">10:45:18 AM</span>
+                                 <span className="text-gray-700 dark:text-gray-300">Identified 4 departments required</span>
+                               </div>
+                               <div className="flex gap-6">
+                                 <span className="text-gray-400 dark:text-founder-textMuted w-24">10:45:22 AM</span>
+                                 <span className="text-gray-700 dark:text-gray-300">Delegating tasks to specialized agents</span>
+                               </div>
+                               <div className="flex gap-6">
+                                 <span className="text-gray-400 dark:text-founder-textMuted w-24">10:45:24 AM</span>
+                                 <span className="text-gray-700 dark:text-gray-300">All agents notified and tasks initiated</span>
+                               </div>
+                            </div>
+                          </div>
+                          <div className="bg-[#120E1E] border border-[#251B38] rounded-2xl p-6 flex flex-col justify-center items-center text-center relative overflow-hidden shadow-sm">
+                             {/* Subtle glow background */}
+                             <div className="absolute inset-0 bg-emerald-500/5 z-0 pointer-events-none"></div>
+                             <div className="w-10 h-10 rounded-full border border-emerald-500/30 flex items-center justify-center mb-3 z-10 relative bg-[#120E1E]">
+                               <CheckCircle2 size={20} className="text-emerald-500" />
+                             </div>
+                             <h4 className="text-emerald-500 font-bold text-sm mb-2 z-10 relative">Delegation Initiated Successfully</h4>
+                             <p className="text-[11px] text-gray-400 leading-relaxed mb-5 z-10 relative max-w-[220px]">
+                               All agents have received their tasks and are now working on your request.
+                             </p>
+                             <button className="bg-[#2D234A] hover:bg-[#3B2D60] border border-[#3B2D60] text-white px-5 py-2 rounded-lg text-xs font-bold transition-colors z-10 relative shadow-sm">
+                               View Progress
+                             </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()
+                )}
+              </div>
+            </motion.div>
+          )}
+
+          {/* Sub-Agent Panels (Hiring, Marketing, Finance, Legal) */}
+          {['Hiring Agent', 'Marketing Agent', 'Finance Agent', 'Legal Agent'].includes(activeTab) && (
+            <motion.div
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              className="space-y-6"
+            >
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl font-bold tracking-tight">{activeTab} Workspace</h2>
+                  <p className="text-gray-500 dark:text-founder-textMuted text-sm font-medium mt-1">Manage and execute delegated tasks for this department.</p>
+                </div>
+                <button 
+                  onClick={() => {
+                    setIsExecutingAgents(true);
+                    setTimeout(() => setIsExecutingAgents(false), 3000);
+                  }}
+                  disabled={isExecutingAgents}
+                  className="flex items-center justify-center gap-2 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-bold py-3 px-6 rounded-xl transition-all text-sm shadow-lg shadow-[#8B5CF6]/20 disabled:bg-gray-400"
+                >
+                  {isExecutingAgents ? (
+                    <><Loader2 className="animate-spin" size={16} /> Executing...</>
+                  ) : (
+                    <><Play size={16} /> Execute All Tasks</>
+                  )}
+                </button>
+              </div>
+
+              {/* Grid of agent task cards */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+                {[1, 2, 3, 4].map((i) => (
+                   <div key={i} className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-2xl p-6 flex flex-col justify-between hover:border-[#2D234A] transition-colors min-h-[200px]">
+                     <div>
+                       <div className="flex justify-between items-start mb-3">
+                         <h3 className="font-bold text-gray-900 dark:text-white">Workflow Queue #{i}</h3>
+                         <span className="bg-gray-100 dark:bg-[#1C162E] text-gray-500 dark:text-gray-400 border border-gray-200 dark:border-[#2D234A] text-[10px] font-bold px-2 py-0.5 rounded">PENDING</span>
+                       </div>
+                       <p className="text-xs text-gray-500 dark:text-founder-textMuted leading-relaxed">
+                         Awaiting execution command from the {activeTab.split(' ')[0]} pipeline. This workflow includes data processing, API synchronization, and final output generation.
+                       </p>
+                     </div>
+                     <div className="flex gap-3 mt-6">
+                       <button className="flex-1 text-xs font-bold text-gray-900 dark:text-white border border-gray-200 dark:border-[#251B38] px-4 py-2.5 rounded-lg hover:bg-gray-50 dark:hover:bg-[#1C162E] transition-colors text-center">
+                         View Details
+                       </button>
+                       <button className="flex-1 text-xs font-bold text-[#00DF89] bg-[#00DF89]/10 border border-[#00DF89]/20 px-4 py-2.5 rounded-lg hover:bg-[#00DF89]/20 transition-colors text-center">
+                         Start Task
+                       </button>
+                     </div>
+                   </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
           {/* Placeholder for other sections */}
-          {activeTab !== 'Overview' && activeTab !== 'Goals' && activeTab !== 'Tasks' && (
+          {activeTab !== 'Dashboard' && activeTab !== 'Goals' && activeTab !== 'Tasks' && activeTab !== 'CEO Agent' && !['Hiring Agent', 'Marketing Agent', 'Finance Agent', 'Legal Agent'].includes(activeTab) && (
             <motion.div
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}

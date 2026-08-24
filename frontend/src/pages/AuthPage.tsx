@@ -21,6 +21,7 @@ export function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [name, setName] = useState('');
 
   useEffect(() => {
@@ -50,13 +51,80 @@ export function AuthPage() {
     navigate(`/auth?mode=${!isLogin ? 'login' : 'signup'}`, { replace: true });
   };
 
-  const handleAuth = (e: React.FormEvent) => {
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    localStorage.setItem('user', JSON.stringify({
-      name: isLogin ? 'Founder' : (name || 'Founder'),
-      email: email || 'founder@company.com'
-    }));
-    navigate('/dashboard');
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      
+      if (isLogin) {
+        const formData = new URLSearchParams();
+        formData.append('username', email);
+        formData.append('password', password);
+        
+        const response = await fetch(`${apiUrl}/api/auth/login`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: formData,
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          localStorage.setItem('token', data.access_token);
+          
+          const userResp = await fetch(`${apiUrl}/api/users/me`, {
+            headers: { 'Authorization': `Bearer ${data.access_token}` }
+          });
+          if (userResp.ok) {
+            const userData = await userResp.json();
+            localStorage.setItem('user', JSON.stringify({ 
+              name: userData.full_name || 'Founder', 
+              email: userData.email,
+              id: userData.id
+            }));
+          }
+          navigate('/dashboard');
+        } else {
+          const errData = await response.json();
+          alert(`Login failed: ${errData.detail}`);
+        }
+      } else {
+        const response = await fetch(`${apiUrl}/api/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email,
+            password,
+            full_name: name
+          }),
+        });
+        
+        if (response.ok) {
+          alert('Registration successful! Logging you in...');
+          const formData = new URLSearchParams();
+          formData.append('username', email);
+          formData.append('password', password);
+          const loginRes = await fetch(`${apiUrl}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: formData,
+          });
+          if (loginRes.ok) {
+            const data = await loginRes.json();
+            localStorage.setItem('token', data.access_token);
+            localStorage.setItem('user', JSON.stringify({ name: name || 'Founder', email }));
+            navigate('/dashboard');
+          }
+        } else {
+            const errData = await response.json();
+            alert(`Registration failed: ${errData.detail}`);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      alert('An error occurred');
+    }
   };
 
   const handleGoogleClick = () => {
@@ -76,19 +144,34 @@ export function AuthPage() {
             try {
               const res = await fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${tokenResponse.access_token}`);
               const data = await res.json();
-              localStorage.setItem('user', JSON.stringify({ 
-                name: data.name || 'Google User', 
-                email: data.email,
-                picture: data.picture
-              }));
+              
+              const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+              const socialRes = await fetch(`${apiUrl}/api/auth/social`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  email: data.email,
+                  full_name: data.name,
+                  picture: data.picture
+                })
+              });
+
+              if (socialRes.ok) {
+                const socialData = await socialRes.json();
+                localStorage.setItem('token', socialData.access_token);
+                localStorage.setItem('user', JSON.stringify({ 
+                  name: data.name || 'Google User', 
+                  email: data.email,
+                  picture: data.picture
+                }));
+                navigate('/dashboard');
+              } else {
+                alert('Social login failed on the server.');
+              }
             } catch (err) {
               console.error('Error fetching Google user profile:', err);
-              localStorage.setItem('user', JSON.stringify({ 
-                name: 'Google User', 
-                email: 'google@company.com'
-              }));
+              alert('An error occurred during Google Login.');
             }
-            navigate('/dashboard');
           }
         },
       });
@@ -181,6 +264,8 @@ export function AuthPage() {
               <input 
                 type={showPassword ? "text" : "password"}
                 placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 className="w-full px-4 py-3 bg-gray-50 dark:bg-founder-dark/50 border border-gray-200 dark:border-founder-border rounded-xl text-gray-900 dark:text-white focus:ring-2 focus:ring-founder-primary focus:border-transparent transition-colors outline-none pr-12"
               />
               <button

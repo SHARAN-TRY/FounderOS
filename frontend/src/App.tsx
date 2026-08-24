@@ -32,6 +32,7 @@ function App() {
             <Route path="/contact" element={<ContactPage />} />
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/dashboard/:tabId" element={<DashboardPage />} />
           </Routes>
         </motion.div>
       )}
