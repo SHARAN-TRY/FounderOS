@@ -1,4 +1,32 @@
-node_modules
-dist
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment & Secrets
 .env
 .env.*
+!.env.example
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Databases & local state
+*.db
+*.sqlite
+*.sqlite3
+backend/founderos.db
+backend/sql_app.db
+
+# Logs & temp files
+*.log
+npm-debug.log*
+yarn-debug.log*
+.DS_Store
+Thumbs.db
+
+push_to_github.*

@@ -136,46 +136,75 @@ export function AuthPage() {
 
     const google = (window as any).google;
     if (google && google.accounts && google.accounts.oauth2) {
-      const client = google.accounts.oauth2.initTokenClient({
-        client_id: clientId,
-        scope: 'openid email profile',
-        callback: async (tokenResponse: any) => {
-          if (tokenResponse && tokenResponse.access_token) {
-            try {
-              const res = await fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${tokenResponse.access_token}`);
-              const data = await res.json();
-              
-              const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-              const socialRes = await fetch(`${apiUrl}/api/auth/social`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  email: data.email,
-                  full_name: data.name,
-                  picture: data.picture
-                })
-              });
-
-              if (socialRes.ok) {
-                const socialData = await socialRes.json();
-                localStorage.setItem('token', socialData.access_token);
-                localStorage.setItem('user', JSON.stringify({ 
-                  name: data.name || 'Google User', 
-                  email: data.email,
-                  picture: data.picture
-                }));
-                navigate('/dashboard');
-              } else {
-                alert('Social login failed on the server.');
-              }
-            } catch (err) {
-              console.error('Error fetching Google user profile:', err);
-              alert('An error occurred during Google Login.');
+      try {
+        const client = google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: 'openid email profile',
+          error_callback: (error: any) => {
+            console.error('Google OAuth Client error:', error);
+            alert(`Google Sign-In Error: ${error?.message || error?.type || 'Failed to initialize Google login'}`);
+          },
+          callback: async (tokenResponse: any) => {
+            if (tokenResponse.error) {
+              console.error('Google OAuth response error:', tokenResponse);
+              alert(`Google Login Error: ${tokenResponse.error_description || tokenResponse.error}`);
+              return;
             }
-          }
-        },
-      });
-      client.requestAccessToken();
+
+            if (tokenResponse && tokenResponse.access_token) {
+              try {
+                const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                  headers: {
+                    Authorization: `Bearer ${tokenResponse.access_token}`,
+                  },
+                });
+                
+                if (!res.ok) {
+                  const errText = await res.text();
+                  throw new Error(`Failed to fetch Google profile (${res.status}): ${errText}`);
+                }
+
+                const data = await res.json();
+                if (!data.email) {
+                  throw new Error('No email found in Google profile');
+                }
+                
+                const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+                const socialRes = await fetch(`${apiUrl}/api/auth/social`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    email: data.email,
+                    full_name: data.name || data.email.split('@')[0],
+                    picture: data.picture || ''
+                  })
+                });
+
+                if (socialRes.ok) {
+                  const socialData = await socialRes.json();
+                  localStorage.setItem('token', socialData.access_token);
+                  localStorage.setItem('user', JSON.stringify({ 
+                    name: data.name || data.email.split('@')[0], 
+                    email: data.email,
+                    picture: data.picture
+                  }));
+                  navigate('/dashboard');
+                } else {
+                  const errData = await socialRes.json().catch(() => ({ detail: 'Unknown server error' }));
+                  alert(`Social login failed: ${errData.detail || 'Server error'}`);
+                }
+              } catch (err: any) {
+                console.error('Error during Google authentication:', err);
+                alert(`Google Login Error: ${err.message || 'An unexpected error occurred.'}`);
+              }
+            }
+          },
+        });
+        client.requestAccessToken();
+      } catch (clientErr: any) {
+        console.error('Failed to request Google access token:', clientErr);
+        alert(`Google Login Error: ${clientErr.message || 'Failed to open Google Sign-in popup.'}`);
+      }
     } else {
       alert("Google Identity Services script is still loading. Please wait a second and try again.");
     }

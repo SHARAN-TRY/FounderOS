@@ -85,16 +85,24 @@ def social_login(social_user: schemas.SocialLogin, db: Session = Depends(get_db)
 def read_users_me(current_user: models.User = Depends(auth.get_current_user)):
     return current_user
 
+import json
+from datetime import datetime
+from orchestrator import CEOOrchestrator
+
 @app.get("/api/dashboard")
 def get_dashboard(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
     goals = db.query(models.Goal).filter(models.Goal.user_id == current_user.id).all()
-    tasks = db.query(models.Task).filter(models.Task.user_id == current_user.id).all()
-    activities = db.query(models.AgentActivity).filter(models.AgentActivity.user_id == current_user.id).order_by(models.AgentActivity.created_at.desc()).limit(10).all()
+    tasks = db.query(models.Task).filter(models.Task.user_id == current_user.id).order_by(models.Task.created_at.desc()).all()
+    activities = db.query(models.AgentActivity).filter(models.AgentActivity.user_id == current_user.id).order_by(models.AgentActivity.created_at.desc()).limit(15).all()
+    audit_logs = db.query(models.AuditLog).filter(models.AuditLog.user_id == current_user.id).order_by(models.AuditLog.created_at.desc()).limit(20).all()
+    approvals = db.query(models.Approval).filter(models.Approval.user_id == current_user.id).order_by(models.Approval.created_at.desc()).limit(10).all()
     
     return {
         "goals": [schemas.Goal.model_validate(g) for g in goals],
         "tasks": [schemas.Task.model_validate(t) for t in tasks],
-        "activities": [schemas.AgentActivity.model_validate(a) for a in activities]
+        "activities": [schemas.AgentActivity.model_validate(a) for a in activities],
+        "audit_logs": [schemas.AuditLog.model_validate(al) for al in audit_logs],
+        "approvals": [schemas.Approval.model_validate(ap) for ap in approvals]
     }
 
 @app.get("/api/goals", response_model=List[schemas.Goal])
@@ -112,47 +120,156 @@ def create_goal(goal: schemas.GoalCreate, db: Session = Depends(get_db), current
 
 @app.get("/api/tasks", response_model=List[schemas.Task])
 def read_tasks(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
-    tasks = db.query(models.Task).filter(models.Task.user_id == current_user.id).offset(skip).limit(limit).all()
+    tasks = db.query(models.Task).filter(models.Task.user_id == current_user.id).order_by(models.Task.created_at.desc()).offset(skip).limit(limit).all()
     return tasks
 
 @app.post("/api/tasks", response_model=schemas.Task)
 def create_task(task: schemas.TaskCreate, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
-    db_task = models.Task(**task.model_dump(), user_id=current_user.id)
+    """
+    Founder enters task -> Persistent Task created (DRAFT) -> Automatically sent to CEO Agent ->
+    CEO Agent analyzes task & creates execution plan (AWAITING_PLAN_APPROVAL).
+    """
+    date_str = task.date or datetime.now().strftime("%b %d, %Y")
+    db_task = models.Task(
+        title=task.title,
+        date=date_str,
+        goal_id=task.goal_id,
+        status="CEO_ANALYZING",
+        user_id=current_user.id
+    )
     db.add(db_task)
     db.commit()
     db.refresh(db_task)
+
+    # Immediately run CEO Orchestration to decompose and create persistent execution plan
+    CEOOrchestrator.setup_task_workflow(db_task, db, current_user.id)
+    db.refresh(db_task)
     return db_task
 
-@app.post("/api/tasks/{task_id}/analyze")
-def analyze_task(task_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+@app.get("/api/tasks/{task_id}", response_model=schemas.Task)
+def get_task(task_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+    task = db.query(models.Task).filter(models.Task.id == task_id, models.Task.user_id == current_user.id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
+@app.post("/api/tasks/{task_id}/plan/approve", response_model=schemas.Task)
+def approve_plan(task_id: int, req: schemas.PlanApprovalRequest, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
     """
-    Mock CEO Agent Endpoint.
-    This simulates the CEO Agent breaking down a task and delegating it to other agents.
+    Level A Approval: Founder approves the CEO's overall execution plan.
+    Transitions task to APPROVED and unlocks initial agent tasks to READY.
     """
     task = db.query(models.Task).filter(models.Task.id == task_id, models.Task.user_id == current_user.id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    # Mocking real CEO agent output for now
-    # We will simulate delegating to Hiring, Marketing, Finance, Legal based on task content later if needed,
-    # but for now we'll just mock static ones.
-    delegations = [
-        {"agent": "Hiring", "task_description": "Define JD based on task context", "status": "pending"},
-        {"agent": "Marketing", "task_description": "Draft social media post for announcement", "status": "pending"},
-        {"agent": "Finance", "task_description": "Allocate budget for execution", "status": "pending"},
-        {"agent": "Legal", "task_description": "Verify compliance and draft agreements", "status": "pending"}
-    ]
+    updated_task = CEOOrchestrator.approve_plan(task, db, current_user.id, decision=req.decision, feedback=req.feedback)
+    return updated_task
+
+@app.post("/api/tasks/{task_id}/plan/reject", response_model=schemas.Task)
+def reject_plan(task_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+    task = db.query(models.Task).filter(models.Task.id == task_id, models.Task.user_id == current_user.id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
     
-    for d in delegations:
-        db_delegation = models.Delegation(
-            agent=d["agent"],
-            task_description=d["task_description"],
-            status=d["status"],
-            task_id=task.id,
-            user_id=current_user.id
-        )
-        db.add(db_delegation)
-        
+    task.status = "REJECTED"
     db.commit()
     db.refresh(task)
     return task
+
+@app.post("/api/tasks/{task_id}/analyze", response_model=schemas.Task)
+def analyze_task(task_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+    """
+    Re-analyzes task and resets CEO plan.
+    """
+    task = db.query(models.Task).filter(models.Task.id == task_id, models.Task.user_id == current_user.id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    updated_task = CEOOrchestrator.setup_task_workflow(task, db, current_user.id)
+    return updated_task
+
+@app.post("/api/agent-tasks/{delegation_id}/start", response_model=schemas.Delegation)
+def start_agent_task(delegation_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+    """
+    Founder clicks START TASK inside the agent workspace.
+    Executes the agent, gathers upstream context via CEO state, and produces structured results.
+    """
+    delegation = db.query(models.Delegation).filter(models.Delegation.id == delegation_id, models.Delegation.user_id == current_user.id).first()
+    if not delegation:
+        raise HTTPException(status_code=404, detail="Agent task not found")
+    
+    if delegation.status == "BLOCKED":
+        raise HTTPException(status_code=400, detail="Task is blocked by upstream dependencies.")
+    
+    updated_del = CEOOrchestrator.execute_agent_task(delegation, db, current_user.id)
+    return updated_del
+
+@app.post("/api/agent-tasks/{delegation_id}/approve", response_model=schemas.Delegation)
+def approve_agent_result(delegation_id: int, req: Optional[schemas.PlanApprovalRequest] = None, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+    """
+    Level B Approval: Founder reviews and approves the agent's generated result.
+    Marks task COMPLETED, unblocks downstream dependencies, and updates project progress.
+    """
+    delegation = db.query(models.Delegation).filter(models.Delegation.id == delegation_id, models.Delegation.user_id == current_user.id).first()
+    if not delegation:
+        raise HTTPException(status_code=404, detail="Agent task not found")
+    
+    feedback = req.feedback if req else None
+    updated_del = CEOOrchestrator.approve_agent_result(delegation, db, current_user.id, feedback=feedback)
+    return updated_del
+
+@app.post("/api/agent-tasks/{delegation_id}/consequential-action")
+def execute_consequential_action(delegation_id: int, req: schemas.ConsequentialActionRequest, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+    """
+    Level C Approval Gate: Explicit founder authorization for external/consequential action
+    (e.g., publishing to LinkedIn/Telegram, issuing offer letter).
+    """
+    delegation = db.query(models.Delegation).filter(models.Delegation.id == delegation_id, models.Delegation.user_id == current_user.id).first()
+    if not delegation:
+        raise HTTPException(status_code=404, detail="Agent task not found")
+    
+    res = CEOOrchestrator.execute_consequential_action(
+        delegation=delegation,
+        action_id=req.action_id,
+        action_name=req.action_name,
+        payload=req.payload or {},
+        db=db,
+        user_id=current_user.id
+    )
+    return {
+        "status": "SUCCESS",
+        "action_id": req.action_id,
+        "action_result": res["action_result"],
+        "delegation": schemas.Delegation.model_validate(res["delegation"])
+    }
+
+@app.post("/api/agent-tasks/{delegation_id}/revise", response_model=schemas.Delegation)
+def revise_agent_task(delegation_id: int, req: schemas.RevisionRequest, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+    """
+    Requests revision on an agent result with specific founder feedback.
+    """
+    delegation = db.query(models.Delegation).filter(models.Delegation.id == delegation_id, models.Delegation.user_id == current_user.id).first()
+    if not delegation:
+        raise HTTPException(status_code=404, detail="Agent task not found")
+    
+    delegation.status = "NEEDS_REVISION"
+    delegation.error_message = req.feedback
+    
+    audit = models.AuditLog(
+        task_id=delegation.task_id,
+        agent_name=f"{delegation.agent} Agent",
+        action_type="REVISION",
+        summary=f"Founder requested revision for {delegation.agent} Agent: '{req.feedback[:60]}'.",
+        details=json.dumps({"feedback": req.feedback}),
+        user_id=current_user.id
+    )
+    db.add(audit)
+    db.commit()
+    db.refresh(delegation)
+    return delegation
+
+@app.get("/api/audit-logs", response_model=List[schemas.AuditLog])
+def get_audit_logs(skip: int = 0, limit: int = 50, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+    logs = db.query(models.AuditLog).filter(models.AuditLog.user_id == current_user.id).order_by(models.AuditLog.created_at.desc()).offset(skip).limit(limit).all()
+    return logs
