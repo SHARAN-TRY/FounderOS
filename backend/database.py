@@ -8,12 +8,10 @@ load_dotenv()
 
 # We will use a local SQLite DB if POSTGRES_URL isn't provided to prevent crashes if postgres isn't running yet,
 # but the user requested PostgreSQL.
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/founderos")
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./founderos.db")
 
-# If testing locally without postgres installed, one might use: "sqlite:///./sql_app.db"
-# But we are strictly adhering to PostgreSQL per user request.
-
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+connect_args = {"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()

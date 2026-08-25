@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import List, Optional
+from typing import List, Optional, Any, Dict
 from datetime import datetime
 
 class Token(BaseModel):
@@ -30,10 +30,53 @@ class SocialLogin(BaseModel):
     picture: Optional[str] = None
 
 
+# CEO Planning Schemas
+class CEOPlanStep(BaseModel):
+    order: int
+    agent: str
+    responsibility: str
+    dependencies: List[str] = []
+    required_inputs: List[str] = []
+    expected_output: str
+    approval_required: bool = True
+
+class CEOPlan(BaseModel):
+    goal: str
+    analysis: List[str] = []
+    required_agents: List[str] = []
+    skipped_agents: List[str] = []
+    execution_steps: List[CEOPlanStep] = []
+    risks: List[str] = []
+    budget_estimate: Optional[str] = None
+    recommended_order: List[str] = []
+
+class PlanApprovalRequest(BaseModel):
+    decision: str = "APPROVED"  # APPROVED, REJECTED, MODIFIED
+    feedback: Optional[str] = None
+    modifications: Optional[Dict[str, Any]] = None
+
+class ConsequentialActionRequest(BaseModel):
+    action_id: str
+    action_name: str
+    payload: Optional[Dict[str, Any]] = None
+    notes: Optional[str] = None
+
+class RevisionRequest(BaseModel):
+    feedback: str
+
+
 class DelegationBase(BaseModel):
     agent: str
     task_description: str
-    status: str = "pending"
+    status: str = "BLOCKED"
+    order_index: int = 1
+    dependencies: Optional[str] = "[]"
+    context_input: Optional[str] = "{}"
+    decision_summary: Optional[str] = None
+    result_output: Optional[str] = "{}"
+    actions_available: Optional[str] = "[]"
+    actions_taken: Optional[str] = "[]"
+    error_message: Optional[str] = None
 
 class DelegationCreate(DelegationBase):
     pass
@@ -42,27 +85,37 @@ class Delegation(DelegationBase):
     id: int
     task_id: int
     user_id: int
+    created_at: datetime
+    approved_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
 
+
 class TaskBase(BaseModel):
     title: str
-    status: str = "pending"
+    status: str = "DRAFT"
     date: str
+    progress: int = 0
+    summary: Optional[str] = None
+    plan_data: Optional[str] = None
     goal_id: Optional[int] = None
 
-class TaskCreate(TaskBase):
-    pass
+class TaskCreate(BaseModel):
+    title: str
+    date: Optional[str] = None
+    goal_id: Optional[int] = None
 
 class Task(TaskBase):
     id: int
     user_id: int
     created_at: datetime
+    updated_at: Optional[datetime] = None
     delegations: List[Delegation] = []
 
     class Config:
         from_attributes = True
+
 
 class GoalBase(BaseModel):
     title: str
@@ -84,6 +137,7 @@ class Goal(GoalBase):
     class Config:
         from_attributes = True
 
+
 class AgentActivityBase(BaseModel):
     agent_name: str
     action: str
@@ -102,6 +156,7 @@ class AgentActivity(AgentActivityBase):
     class Config:
         from_attributes = True
 
+
 class AgentBase(BaseModel):
     name: str
     role: str
@@ -117,20 +172,61 @@ class Agent(AgentBase):
     class Config:
         from_attributes = True
 
+
 class ApprovalBase(BaseModel):
     title: str
-    status: str = "pending"
+    approval_level: str = "PLAN_APPROVAL"
+    action_name: Optional[str] = None
+    decision: str = "APPROVED"
+    feedback: Optional[str] = None
+    action_payload: Optional[str] = None
 
 class ApprovalCreate(ApprovalBase):
-    pass
+    task_id: Optional[int] = None
+    delegation_id: Optional[int] = None
 
 class Approval(ApprovalBase):
+    id: int
+    task_id: Optional[int] = None
+    delegation_id: Optional[int] = None
+    user_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AuditLogBase(BaseModel):
+    task_id: Optional[int] = None
+    agent_name: str
+    action_type: str
+    summary: str
+    details: Optional[str] = "{}"
+
+class AuditLog(AuditLogBase):
     id: int
     user_id: int
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class AgentMessageBase(BaseModel):
+    task_id: int
+    sender: str
+    recipient: str
+    message_type: str
+    content: str
+
+class AgentMessage(AgentMessageBase):
+    id: int
+    user_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 
 class WorkflowBase(BaseModel):
     name: str
@@ -146,3 +242,4 @@ class Workflow(WorkflowBase):
 
     class Config:
         from_attributes = True
+
