@@ -47,21 +47,49 @@ export function AuthPage() {
 
   const toggleMode = () => {
     setIsLogin(!isLogin);
-    // Optionally update URL
     navigate(`/auth?mode=${!isLogin ? 'login' : 'signup'}`, { replace: true });
+  };
+
+  // Helper to query backend across Vite proxy and direct backend URLs
+  const makeApiRequest = async (endpoint: string, options: RequestInit) => {
+    const configuredApiUrl = import.meta.env.VITE_API_URL;
+    const urlsToTry: string[] = [];
+    
+    // 1. Try relative path (Vite proxy / same origin)
+    urlsToTry.push(endpoint);
+    // 2. Try configured API URL
+    if (configuredApiUrl && !urlsToTry.includes(`${configuredApiUrl}${endpoint}`)) {
+      urlsToTry.push(`${configuredApiUrl}${endpoint}`);
+    }
+    // 3. Try standard localhost port 8000
+    if (!urlsToTry.includes(`http://localhost:8000${endpoint}`)) {
+      urlsToTry.push(`http://localhost:8000${endpoint}`);
+    }
+    if (!urlsToTry.includes(`http://127.0.0.1:8000${endpoint}`)) {
+      urlsToTry.push(`http://127.0.0.1:8000${endpoint}`);
+    }
+
+    let lastError: any = null;
+    for (const url of urlsToTry) {
+      try {
+        const res = await fetch(url, options);
+        return res;
+      } catch (err: any) {
+        lastError = err;
+      }
+    }
+    throw new Error(`Cannot connect to FounderOS backend server. Please make sure backend is running on http://localhost:8000 (Error: ${lastError?.message || 'Failed to fetch'})`);
   };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-      
       if (isLogin) {
         const formData = new URLSearchParams();
         formData.append('username', email);
         formData.append('password', password);
         
-        const response = await fetch(`${apiUrl}/api/auth/login`, {
+        const response = await makeApiRequest('/api/auth/login', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -73,7 +101,7 @@ export function AuthPage() {
           const data = await response.json();
           localStorage.setItem('token', data.access_token);
           
-          const userResp = await fetch(`${apiUrl}/api/users/me`, {
+          const userResp = await makeApiRequest('/api/users/me', {
             headers: { 'Authorization': `Bearer ${data.access_token}` }
           });
           if (userResp.ok) {
@@ -86,11 +114,11 @@ export function AuthPage() {
           }
           navigate('/dashboard');
         } else {
-          const errData = await response.json();
-          alert(`Login failed: ${errData.detail}`);
+          const errData = await response.json().catch(() => ({ detail: 'Authentication failed' }));
+          alert(`Login failed: ${errData.detail || 'Invalid credentials'}`);
         }
       } else {
-        const response = await fetch(`${apiUrl}/api/auth/register`, {
+        const response = await makeApiRequest('/api/auth/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -105,7 +133,7 @@ export function AuthPage() {
           const formData = new URLSearchParams();
           formData.append('username', email);
           formData.append('password', password);
-          const loginRes = await fetch(`${apiUrl}/api/auth/login`, {
+          const loginRes = await makeApiRequest('/api/auth/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: formData,
@@ -117,13 +145,13 @@ export function AuthPage() {
             navigate('/dashboard');
           }
         } else {
-            const errData = await response.json();
-            alert(`Registration failed: ${errData.detail}`);
+          const errData = await response.json().catch(() => ({ detail: 'Registration failed' }));
+          alert(`Registration failed: ${errData.detail || 'Could not create account'}`);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('An error occurred');
+      alert(err.message || 'An error occurred during authentication');
     }
   };
 
@@ -142,7 +170,7 @@ export function AuthPage() {
           scope: 'openid email profile',
           error_callback: (error: any) => {
             console.error('Google OAuth Client error:', error);
-            alert(`Google Sign-In Error: ${error?.message || error?.type || 'Failed to initialize Google login'}`);
+            alert(`Google Sign-In Error: ${error?.message || error?.type || 'Failed to initialize Google login popup'}`);
           },
           callback: async (tokenResponse: any) => {
             if (tokenResponse.error) {
@@ -153,24 +181,30 @@ export function AuthPage() {
 
             if (tokenResponse && tokenResponse.access_token) {
               try {
-                const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-                  headers: {
-                    Authorization: `Bearer ${tokenResponse.access_token}`,
-                  },
-                });
-                
-                if (!res.ok) {
-                  const errText = await res.text();
-                  throw new Error(`Failed to fetch Google profile (${res.status}): ${errText}`);
+                // Step 1: Fetch Google Profile Info
+                let data: any = null;
+                try {
+                  const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                    headers: {
+                      Authorization: `Bearer ${tokenResponse.access_token}`,
+                    },
+                  });
+                  
+                  if (!res.ok) {
+                    const errText = await res.text();
+                    throw new Error(`Google profile response error (${res.status}): ${errText}`);
+                  }
+                  data = await res.json();
+                } catch (gErr: any) {
+                  throw new Error(`Failed to fetch Google user profile: ${gErr.message}`);
                 }
 
-                const data = await res.json();
-                if (!data.email) {
+                if (!data || !data.email) {
                   throw new Error('No email found in Google profile');
                 }
                 
-                const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-                const socialRes = await fetch(`${apiUrl}/api/auth/social`, {
+                // Step 2: Authenticate with FounderOS Backend
+                const socialRes = await makeApiRequest('/api/auth/social', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
