@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional, Any
 from datetime import timedelta
 import os
 
@@ -82,7 +82,7 @@ def social_login(social_user: schemas.SocialLogin, db: Session = Depends(get_db)
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.get("/api/users/me", response_model=schemas.User)
-def read_users_me(current_user: models.User = Depends(auth.get_current_user)):
+def read_users_me(current_user: Any = Depends(auth.get_current_user)):
     return current_user
 
 import json
@@ -90,7 +90,7 @@ from datetime import datetime
 from orchestrator import CEOOrchestrator
 
 @app.get("/api/dashboard")
-def get_dashboard(db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+def get_dashboard(db: Session = Depends(get_db), current_user: Any = Depends(auth.get_current_user)):
     goals = db.query(models.Goal).filter(models.Goal.user_id == current_user.id).all()
     tasks = db.query(models.Task).filter(models.Task.user_id == current_user.id).order_by(models.Task.created_at.desc()).all()
     activities = db.query(models.AgentActivity).filter(models.AgentActivity.user_id == current_user.id).order_by(models.AgentActivity.created_at.desc()).limit(15).all()
@@ -106,12 +106,12 @@ def get_dashboard(db: Session = Depends(get_db), current_user: models.User = Dep
     }
 
 @app.get("/api/goals", response_model=List[schemas.Goal])
-def read_goals(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+def read_goals(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: Any = Depends(auth.get_current_user)):
     goals = db.query(models.Goal).filter(models.Goal.user_id == current_user.id).offset(skip).limit(limit).all()
     return goals
 
 @app.post("/api/goals", response_model=schemas.Goal)
-def create_goal(goal: schemas.GoalCreate, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+def create_goal(goal: schemas.GoalCreate, db: Session = Depends(get_db), current_user: Any = Depends(auth.get_current_user)):
     db_goal = models.Goal(**goal.model_dump(), user_id=current_user.id)
     db.add(db_goal)
     db.commit()
@@ -119,42 +119,39 @@ def create_goal(goal: schemas.GoalCreate, db: Session = Depends(get_db), current
     return db_goal
 
 @app.get("/api/tasks", response_model=List[schemas.Task])
-def read_tasks(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+def read_tasks(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: Any = Depends(auth.get_current_user)):
     tasks = db.query(models.Task).filter(models.Task.user_id == current_user.id).order_by(models.Task.created_at.desc()).offset(skip).limit(limit).all()
     return tasks
 
 @app.post("/api/tasks", response_model=schemas.Task)
-def create_task(task: schemas.TaskCreate, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+def create_task(task: schemas.TaskCreate, db: Session = Depends(get_db), current_user: Any = Depends(auth.get_current_user)):
     """
-    Founder enters task -> Persistent Task created (DRAFT) -> Automatically sent to CEO Agent ->
-    CEO Agent analyzes task & creates execution plan (AWAITING_PLAN_APPROVAL).
+    Founder enters task -> Persistent Task created in DRAFT status.
+    Task will be decomposed & assigned to agents ONLY when user clicks 'Delegate to CEO'.
     """
     date_str = task.date or datetime.now().strftime("%b %d, %Y")
     db_task = models.Task(
         title=task.title,
         date=date_str,
         goal_id=task.goal_id,
-        status="CEO_ANALYZING",
+        status="DRAFT",
+        progress=0,
         user_id=current_user.id
     )
     db.add(db_task)
     db.commit()
     db.refresh(db_task)
-
-    # Immediately run CEO Orchestration to decompose and create persistent execution plan
-    CEOOrchestrator.setup_task_workflow(db_task, db, current_user.id)
-    db.refresh(db_task)
     return db_task
 
 @app.get("/api/tasks/{task_id}", response_model=schemas.Task)
-def get_task(task_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+def get_task(task_id: int, db: Session = Depends(get_db), current_user: Any = Depends(auth.get_current_user)):
     task = db.query(models.Task).filter(models.Task.id == task_id, models.Task.user_id == current_user.id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
 @app.post("/api/tasks/{task_id}/plan/approve", response_model=schemas.Task)
-def approve_plan(task_id: int, req: schemas.PlanApprovalRequest, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+def approve_plan(task_id: int, req: schemas.PlanApprovalRequest, db: Session = Depends(get_db), current_user: Any = Depends(auth.get_current_user)):
     """
     Level A Approval: Founder approves the CEO's overall execution plan.
     Transitions task to APPROVED and unlocks initial agent tasks to READY.
@@ -167,7 +164,7 @@ def approve_plan(task_id: int, req: schemas.PlanApprovalRequest, db: Session = D
     return updated_task
 
 @app.post("/api/tasks/{task_id}/plan/reject", response_model=schemas.Task)
-def reject_plan(task_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+def reject_plan(task_id: int, db: Session = Depends(get_db), current_user: Any = Depends(auth.get_current_user)):
     task = db.query(models.Task).filter(models.Task.id == task_id, models.Task.user_id == current_user.id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -178,19 +175,24 @@ def reject_plan(task_id: int, db: Session = Depends(get_db), current_user: model
     return task
 
 @app.post("/api/tasks/{task_id}/analyze", response_model=schemas.Task)
-def analyze_task(task_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+@app.post("/api/tasks/{task_id}/delegate", response_model=schemas.Task)
+def analyze_task(task_id: int, db: Session = Depends(get_db), current_user: Any = Depends(auth.get_current_user)):
     """
-    Re-analyzes task and resets CEO plan.
+    Explicit 'Delegate to CEO' action:
+    Takes a DRAFT task and triggers the CEO Agent to analyze, decompose into steps, and assign to specialized agents.
     """
     task = db.query(models.Task).filter(models.Task.id == task_id, models.Task.user_id == current_user.id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
+    task.status = "CEO_ANALYZING"
+    db.commit()
+
     updated_task = CEOOrchestrator.setup_task_workflow(task, db, current_user.id)
     return updated_task
 
 @app.post("/api/agent-tasks/{delegation_id}/start", response_model=schemas.Delegation)
-def start_agent_task(delegation_id: int, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+def start_agent_task(delegation_id: int, db: Session = Depends(get_db), current_user: Any = Depends(auth.get_current_user)):
     """
     Founder clicks START TASK inside the agent workspace.
     Executes the agent, gathers upstream context via CEO state, and produces structured results.
@@ -206,7 +208,7 @@ def start_agent_task(delegation_id: int, db: Session = Depends(get_db), current_
     return updated_del
 
 @app.post("/api/agent-tasks/{delegation_id}/approve", response_model=schemas.Delegation)
-def approve_agent_result(delegation_id: int, req: Optional[schemas.PlanApprovalRequest] = None, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+def approve_agent_result(delegation_id: int, req: Optional[schemas.PlanApprovalRequest] = None, db: Session = Depends(get_db), current_user: Any = Depends(auth.get_current_user)):
     """
     Level B Approval: Founder reviews and approves the agent's generated result.
     Marks task COMPLETED, unblocks downstream dependencies, and updates project progress.
@@ -220,7 +222,7 @@ def approve_agent_result(delegation_id: int, req: Optional[schemas.PlanApprovalR
     return updated_del
 
 @app.post("/api/agent-tasks/{delegation_id}/consequential-action")
-def execute_consequential_action(delegation_id: int, req: schemas.ConsequentialActionRequest, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+def execute_consequential_action(delegation_id: int, req: schemas.ConsequentialActionRequest, db: Session = Depends(get_db), current_user: Any = Depends(auth.get_current_user)):
     """
     Level C Approval Gate: Explicit founder authorization for external/consequential action
     (e.g., publishing to LinkedIn/Telegram, issuing offer letter).
@@ -245,7 +247,7 @@ def execute_consequential_action(delegation_id: int, req: schemas.ConsequentialA
     }
 
 @app.post("/api/agent-tasks/{delegation_id}/revise", response_model=schemas.Delegation)
-def revise_agent_task(delegation_id: int, req: schemas.RevisionRequest, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+def revise_agent_task(delegation_id: int, req: schemas.RevisionRequest, db: Session = Depends(get_db), current_user: Any = Depends(auth.get_current_user)):
     """
     Requests revision on an agent result with specific founder feedback.
     """
@@ -270,6 +272,72 @@ def revise_agent_task(delegation_id: int, req: schemas.RevisionRequest, db: Sess
     return delegation
 
 @app.get("/api/audit-logs", response_model=List[schemas.AuditLog])
-def get_audit_logs(skip: int = 0, limit: int = 50, db: Session = Depends(get_db), current_user: models.User = Depends(auth.get_current_user)):
+def get_audit_logs(skip: int = 0, limit: int = 50, db: Session = Depends(get_db), current_user: Any = Depends(auth.get_current_user)):
     logs = db.query(models.AuditLog).filter(models.AuditLog.user_id == current_user.id).order_by(models.AuditLog.created_at.desc()).offset(skip).limit(limit).all()
     return logs
+
+
+# Include Autonomous 5-Agent Architecture Router
+from agent_routes import router as agent_router
+app.include_router(agent_router)
+
+# -----------------------------------------------------------------
+# Mount Unified Frontend Single-Page Application (SPA)
+# -----------------------------------------------------------------
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, HTMLResponse
+
+def get_frontend_dist():
+    candidates = [
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")),
+        "E:\\frontend\\dist",
+        os.path.abspath("../frontend/dist"),
+        os.path.abspath("./frontend/dist"),
+    ]
+    for c in candidates:
+        if os.path.exists(c) and os.path.exists(os.path.join(c, "index.html")):
+            return c
+    return None
+
+dist_folder = get_frontend_dist()
+
+if dist_folder and os.path.exists(dist_folder):
+    assets_folder = os.path.join(dist_folder, "assets")
+    if os.path.exists(assets_folder):
+        app.mount("/assets", StaticFiles(directory=assets_folder), name="assets")
+
+@app.get("/")
+async def serve_root():
+    """
+    Explicit Root Handler: Serves the built frontend index.html at http://localhost:8000/
+    """
+    dist = get_frontend_dist()
+    if dist:
+        index_file = os.path.join(dist, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file, media_type="text/html")
+    return HTMLResponse("<h2>FounderOS Backend is Online</h2><p>Frontend static build not found.</p>")
+
+@app.get("/{full_path:path}")
+async def serve_spa_and_assets(full_path: str):
+    """
+    SPA Catch-All Handler: Serves static assets or index.html for client-side routing.
+    """
+    # Allow API endpoints and Swagger documentation to bypass SPA catch-all
+    if full_path.startswith("api") or full_path.startswith("docs") or full_path.startswith("redoc") or full_path == "openapi.json":
+        raise HTTPException(status_code=404, detail="Endpoint not found")
+
+    dist = get_frontend_dist()
+    if dist:
+        # Check if requesting a direct static file (e.g. favicon.svg, icons.svg)
+        if full_path:
+            specific_file = os.path.join(dist, full_path)
+            if os.path.isfile(specific_file):
+                return FileResponse(specific_file)
+
+        # Serve index.html for all SPA routes (/dashboard, /tasks, /agents, etc.)
+        index_file = os.path.join(dist, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file, media_type="text/html")
+
+    return HTMLResponse("<h2>FounderOS Backend is Online</h2><p>Frontend dist directory not found.</p>")

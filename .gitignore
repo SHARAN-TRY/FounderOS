@@ -30,3 +30,5 @@ yarn-debug.log*
 Thumbs.db
 
 push_to_github.*
+$RECYCLE.BIN/
+System Volume Information/

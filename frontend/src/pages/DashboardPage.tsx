@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   LayoutDashboard, 
@@ -70,6 +70,45 @@ export function DashboardPage() {
   const [copiedText, setCopiedText] = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState<string>('Rahul Sharma');
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
+  const [approvedModalData, setApprovedModalData] = useState<{
+    agent: string;
+    stepOrder: number;
+    nextAgent?: string;
+    isAllComplete?: boolean;
+  } | null>(null);
+
+  // Global Search state & refs
+  const [globalSearchQuery, setGlobalSearchQuery] = useState('');
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Global keyboard shortcut (⌘K / Ctrl+K) and click-outside handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsSearchOpen(true);
+        setTimeout(() => searchInputRef.current?.focus(), 50);
+      }
+      if (e.key === 'Escape') {
+        setIsSearchOpen(false);
+      }
+    };
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchDropdownRef.current && !searchDropdownRef.current.contains(e.target as Node)) {
+        setIsSearchOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   const fetchDashboardData = async () => {
     const token = localStorage.getItem('token');
@@ -117,14 +156,11 @@ export function DashboardPage() {
     }
   }, [navigate]);
 
-  // 1. Task Creation & CEO Automatic Plan Generation
-  const handleTaskSubmit = async (e?: React.FormEvent, customPrompt?: string) => {
+  // 1. Task Creation (Created as DRAFT, assigned to agents only when user clicks Delegate to CEO)
+  const handleTaskSubmit = async (e?: React.FormEvent, customPrompt?: string, autoDelegate: boolean = false) => {
     if (e) e.preventDefault();
     const promptToSubmit = customPrompt || taskInput;
     if (!promptToSubmit.trim() || isAnalyzing) return;
-
-    setActiveTab('CEO Agent');
-    setIsAnalyzing(true);
 
     const token = localStorage.getItem('token');
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -150,16 +186,51 @@ export function DashboardPage() {
       
       setTasksList(prev => [createdTask, ...prev.filter(t => t.id !== createdTask.id)]);
       setSelectedTaskId(createdTask.id);
+      setActionSuccessMessage(`✓ Task created in Tasks section. Click 'Delegate to CEO' to assign to agents.`);
+      setTimeout(() => setActionSuccessMessage(null), 4000);
       await fetchDashboardData();
+
+      if (autoDelegate) {
+        await handleDelegateToCEO(createdTask.id);
+      }
     } catch (err) {
       console.error(err);
     } finally {
       setTaskInput('');
+    }
+  };
+
+  // 1b. Explicit Delegate to CEO Agent
+  const handleDelegateToCEO = async (taskId: number) => {
+    const token = localStorage.getItem('token');
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+    setIsAnalyzing(true);
+    setActiveTab('CEO Agent');
+    try {
+      const res = await fetch(`${apiUrl}/api/tasks/${taskId}/analyze`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (res.ok) {
+        const updatedTask = await res.json();
+        setTasksList(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t));
+        setSelectedTaskId(updatedTask.id);
+        setActionSuccessMessage(`✓ CEO Agent has analyzed directive and formulated multi-agent execution plan.`);
+        setTimeout(() => setActionSuccessMessage(null), 4000);
+        await fetchDashboardData();
+      }
+    } catch (err) {
+      console.error('Failed to delegate to CEO:', err);
+    } finally {
       setIsAnalyzing(false);
     }
   };
 
-  // 2. Level A Approval: Approve CEO Plan
+  // 2. Level A Approval: Approve CEO Plan & Directly Navigate to First Agent Option
   const handleApprovePlan = async (taskId: number, decision: string = 'APPROVED', feedback?: string) => {
     const token = localStorage.getItem('token');
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -177,7 +248,17 @@ export function DashboardPage() {
       if (res.ok) {
         const updatedTask = await res.json();
         setTasksList(prev => prev.map(t => t.id === updatedTask.id ? updatedTask : t));
+        setSelectedTaskId(updatedTask.id);
         await fetchDashboardData();
+
+        // Directly navigate to the first agent option on the left sidebar
+        const firstDel = updatedTask.delegations?.find((d: any) => d.status === 'READY') || updatedTask.delegations?.[0];
+        if (firstDel && firstDel.agent) {
+          const agentTab = firstDel.agent.endsWith('Agent') ? firstDel.agent : `${firstDel.agent} Agent`;
+          setActiveTab(agentTab);
+          setActionSuccessMessage(`✓ Plan approved! Directing to Step 1: ${agentTab}`);
+          setTimeout(() => setActionSuccessMessage(null), 3500);
+        }
       }
     } catch (err) {
       console.error('Failed to approve plan:', err);
@@ -219,7 +300,9 @@ export function DashboardPage() {
 
       if (res.ok) {
         const updatedDel = await res.json();
-        setActiveWorkspaceDelegation(updatedDel);
+        if (activeWorkspaceDelegation?.id === delegationId) {
+          setActiveWorkspaceDelegation(updatedDel);
+        }
         await fetchDashboardData();
       }
     } catch (err) {
@@ -229,7 +312,7 @@ export function DashboardPage() {
     }
   };
 
-  // 5. Level B Approval: Approve Agent Result
+  // 5. Level B Approval: Approve Agent Result & Show Big Green "Approved" Modal
   const handleApproveAgentResult = async (delegationId: number, feedback?: string) => {
     const token = localStorage.getItem('token');
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -246,13 +329,53 @@ export function DashboardPage() {
 
       if (res.ok) {
         const updatedDel = await res.json();
-        setActiveWorkspaceDelegation(updatedDel);
-        setActionSuccessMessage(`✓ ${updatedDel.agent} Agent result approved! Downstream tasks unlocked.`);
-        setTimeout(() => setActionSuccessMessage(null), 3500);
+        setActiveWorkspaceDelegation(null);
         await fetchDashboardData();
+
+        // Determine next delegation in the active directive sequence
+        const currentTask = tasksList.find(t => t.delegations?.some((d: any) => d.id === delegationId));
+        let nextDel: any = null;
+        let isAllDone = false;
+
+        if (currentTask && currentTask.delegations) {
+          const sortedDels = [...currentTask.delegations].sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+          const currentIndex = sortedDels.findIndex((d: any) => d.id === delegationId);
+          if (currentIndex !== -1 && currentIndex + 1 < sortedDels.length) {
+            nextDel = sortedDels[currentIndex + 1];
+          } else {
+            isAllDone = true;
+          }
+        }
+
+        // Display the Big Green "Approved" modal!
+        setApprovedModalData({
+          agent: updatedDel.agent,
+          stepOrder: updatedDel.order_index || 1,
+          nextAgent: nextDel ? nextDel.agent : undefined,
+          isAllComplete: isAllDone
+        });
       }
     } catch (err) {
       console.error('Failed to approve result:', err);
+    }
+  };
+
+  // 5b. Done Action on Big Green "Approved" Modal -> Redirect to Next Agent or CEO Agent
+  const handleDoneApprovalModal = () => {
+    if (!approvedModalData) return;
+
+    const nextAgentName = approvedModalData.nextAgent;
+    setApprovedModalData(null);
+
+    if (nextAgentName) {
+      const nextTabName = nextAgentName.endsWith('Agent') ? nextAgentName : `${nextAgentName} Agent`;
+      setActiveTab(nextTabName);
+      setActionSuccessMessage(`✓ Unlocked Step: ${nextTabName} task is ready for execution!`);
+      setTimeout(() => setActionSuccessMessage(null), 3500);
+    } else {
+      setActiveTab('CEO Agent');
+      setActionSuccessMessage(`🎉 All workstreams completed and verified!`);
+      setTimeout(() => setActionSuccessMessage(null), 4000);
     }
   };
 
@@ -324,12 +447,43 @@ export function DashboardPage() {
     return acc;
   }, []);
 
+  const searchablePages = [
+    { name: 'Dashboard', category: 'Overview', description: 'Real-time metrics, active workflows & quick directives', tab: 'Dashboard', icon: LayoutDashboard },
+    { name: 'Tasks', category: 'Execution', description: 'Active Directives, draft queue & execution status', tab: 'Tasks', icon: ClipboardList },
+    { name: 'CEO Agent', category: 'AI Workforce', description: 'Master Orchestrator, strategic decomposition & DAG control', tab: 'CEO Agent', icon: Briefcase },
+    { name: 'Hiring Agent', category: 'AI Workforce', description: 'Job descriptions, talent sourcing pipelines & interview rubrics', tab: 'Hiring Agent', icon: Users },
+    { name: 'Marketing Agent', category: 'AI Workforce', description: 'Go-to-market strategies, campaign models & viral social copy', tab: 'Marketing Agent', icon: Megaphone },
+    { name: 'Finance Agent', category: 'AI Workforce', description: 'Runway calculations, burn rate models & pricing strategies', tab: 'Finance Agent', icon: DollarSign },
+    { name: 'Legal Agent', category: 'AI Workforce', description: 'Contracts, offer letters, NDAs & IP assignments', tab: 'Legal Agent', icon: Scale },
+    { name: 'Workflow', category: 'System Architecture', description: 'Graph execution records & multi-agent DAG pipelines', tab: 'Workflow', icon: GitBranch },
+    { name: 'Memory', category: 'System Architecture', description: 'Conversational context & cross-session memory store', tab: 'Memory', icon: Cpu },
+    { name: 'Approvals', category: 'Governance', description: 'Human-in-the-loop plan, result & action authorization gates', tab: 'Approvals', icon: CheckSquare },
+    { name: 'Executions', category: 'System Architecture', description: 'Step-by-step audit logs, runtimes & token metrics', tab: 'Executions', icon: Play },
+    { name: 'Monitoring', category: 'System Architecture', description: 'System health, agent workloads & execution statistics', tab: 'Monitoring', icon: Activity },
+    { name: 'Audit Logs', category: 'Governance', description: 'Immutable historical audit trails of all agent actions', tab: 'Audit Logs', icon: FileText },
+    { name: 'Integrations', category: 'Settings', description: 'External API connections, adapters & tools', tab: 'Integrations', icon: LinkIcon },
+    { name: 'Settings', category: 'Settings', description: 'Founder profile & system configuration', tab: 'Settings', icon: Settings },
+  ];
+
   const activeTabMatch = tabId ? allNames.find(n => n.toLowerCase().replace(/\s+/g, '-') === tabId) : undefined;
   const activeTab = activeTabMatch || 'Dashboard';
   
   const setActiveTab = (tabName: string) => {
     navigate(`/dashboard/${tabName.toLowerCase().replace(/\s+/g, '-')}`);
   };
+
+  const filteredSearchPages = (globalSearchQuery.trim()
+    ? searchablePages.filter(p => 
+        p.name.toLowerCase().includes(globalSearchQuery.toLowerCase()) || 
+        p.description.toLowerCase().includes(globalSearchQuery.toLowerCase()) ||
+        p.category.toLowerCase().includes(globalSearchQuery.toLowerCase())
+      )
+    : searchablePages
+  ).filter(p => p.tab !== activeTab && p.name !== activeTab);
+
+  const filteredSearchTasks = globalSearchQuery.trim()
+    ? tasksList.filter(t => t.title.toLowerCase().includes(globalSearchQuery.toLowerCase()))
+    : [];
 
   const currentSelectedTask = tasksList.find(t => t.id === selectedTaskId) || tasksList[0];
 
@@ -496,15 +650,130 @@ export function DashboardPage() {
               <ChevronDown size={14} className="text-gray-400" />
             </div>
 
-            {/* Search Bar */}
-            <div className="relative hidden md:block">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-              <input 
-                type="text" 
-                placeholder="Global Search (⌘K)" 
-                className="bg-gray-100 dark:bg-[#1C162E] border border-gray-200 dark:border-[#2D234A] rounded-lg pl-9 pr-4 py-1.5 text-xs text-gray-800 dark:text-white w-64 focus:outline-none focus:border-founder-primary transition-colors font-medium"
-                disabled
-              />
+            {/* Global Search Bar with Live Navigation Dropdown */}
+            <div className="relative hidden md:block" ref={searchDropdownRef}>
+              <div className="relative flex items-center">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={15} />
+                <input 
+                  ref={searchInputRef}
+                  type="text" 
+                  value={globalSearchQuery}
+                  onChange={(e) => {
+                    setGlobalSearchQuery(e.target.value);
+                    setIsSearchOpen(true);
+                  }}
+                  onFocus={() => setIsSearchOpen(true)}
+                  placeholder="Search pages, agents, tasks... (⌘K)" 
+                  className="bg-gray-100 dark:bg-[#1C162E] border border-gray-200 dark:border-[#2D234A] rounded-xl pl-9 pr-8 py-2 text-xs text-gray-800 dark:text-white w-72 focus:outline-none focus:border-[#8B5CF6] focus:ring-2 focus:ring-[#8B5CF6]/20 transition-all font-medium shadow-sm"
+                />
+                {globalSearchQuery && (
+                  <button 
+                    onClick={() => {
+                      setGlobalSearchQuery('');
+                      setIsSearchOpen(false);
+                    }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+
+              {/* Search Results Dropdown Palette */}
+              <AnimatePresence>
+                {isSearchOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute left-0 top-full mt-2 w-96 bg-white dark:bg-[#151022] border border-gray-200 dark:border-[#2D234A] rounded-2xl shadow-2xl overflow-hidden z-50 max-h-[480px] flex flex-col"
+                  >
+                    <div className="p-3 border-b border-gray-100 dark:border-[#251B38]/60 flex items-center justify-between text-[11px] font-bold text-gray-400 uppercase tracking-wider bg-gray-50/50 dark:bg-[#120E1E]">
+                      <span>Quick Navigation & Search</span>
+                      <span className="text-[10px] bg-gray-100 dark:bg-[#1C162E] px-1.5 py-0.5 rounded text-gray-500 font-mono">ESC</span>
+                    </div>
+
+                    <div className="overflow-y-auto p-2 space-y-3 scrollbar-thin">
+                      {/* Matching Navigation Pages & Agents */}
+                      {filteredSearchPages.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-extrabold text-gray-400 uppercase px-2 mb-1 tracking-wider">Pages & Agents</p>
+                          <div className="space-y-0.5">
+                            {filteredSearchPages.map((page) => {
+                              const Icon = page.icon;
+                              return (
+                                <button
+                                  key={page.name}
+                                  onClick={() => {
+                                    setActiveTab(page.tab);
+                                    setIsSearchOpen(false);
+                                    setGlobalSearchQuery('');
+                                  }}
+                                  className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-left hover:bg-gray-100 dark:hover:bg-[#1C162E] transition-colors group cursor-pointer"
+                                >
+                                  <div className="flex items-center gap-2.5">
+                                    <div className="w-7 h-7 rounded-lg bg-gray-100 dark:bg-[#251B38] text-gray-600 dark:text-gray-300 flex items-center justify-center group-hover:text-[#8B5CF6] transition-colors">
+                                      <Icon size={14} />
+                                    </div>
+                                    <div>
+                                      <p className="text-xs font-bold text-gray-900 dark:text-white group-hover:text-[#8B5CF6] transition-colors">{page.name}</p>
+                                      <p className="text-[10px] text-gray-400 truncate max-w-[200px]">{page.description}</p>
+                                    </div>
+                                  </div>
+                                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-gray-100 dark:bg-[#251B38] text-gray-400 uppercase shrink-0">
+                                    {page.category}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Matching Directives & Tasks */}
+                      {filteredSearchTasks.length > 0 && (
+                        <div>
+                          <p className="text-[10px] font-extrabold text-gray-400 uppercase px-2 mb-1 tracking-wider">Directives & Tasks</p>
+                          <div className="space-y-0.5">
+                            {filteredSearchTasks.slice(0, 4).map((task) => (
+                              <button
+                                key={task.id}
+                                onClick={() => {
+                                  setSelectedTaskId(task.id);
+                                  setActiveTab('CEO Agent');
+                                  setIsSearchOpen(false);
+                                  setGlobalSearchQuery('');
+                                }}
+                                className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-left hover:bg-gray-100 dark:hover:bg-[#1C162E] transition-colors group cursor-pointer"
+                              >
+                                <div className="flex items-center gap-2.5">
+                                  <div className="w-7 h-7 rounded-lg bg-[#8B5CF6]/15 text-[#8B5CF6] flex items-center justify-center shrink-0">
+                                    <ClipboardList size={14} />
+                                  </div>
+                                  <div className="truncate max-w-[200px]">
+                                    <p className="text-xs font-bold text-gray-900 dark:text-white group-hover:text-[#8B5CF6] transition-colors truncate">{task.title}</p>
+                                    <p className="text-[10px] text-gray-400">{task.date}</p>
+                                  </div>
+                                </div>
+                                <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-[#8B5CF6]/15 text-[#8B5CF6] uppercase shrink-0">
+                                  {task.status}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {filteredSearchPages.length === 0 && filteredSearchTasks.length === 0 && (
+                        <div className="p-6 text-center text-gray-400 text-xs">
+                          No matching pages or tasks found for "{globalSearchQuery}"
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
 
@@ -720,12 +989,23 @@ export function DashboardPage() {
                               </div>
                               <div className="flex items-center gap-3">
                                 <span className="text-sm font-extrabold text-[#00DF89]">{task.progress || 0}%</span>
-                                <button 
-                                  onClick={() => { setSelectedTaskId(task.id); setActiveTab('CEO Agent'); }}
-                                  className="px-3.5 py-1.5 bg-[#8B5CF6]/15 hover:bg-[#8B5CF6]/25 text-[#8B5CF6] text-xs font-bold rounded-lg transition-colors"
-                                >
-                                  View Plan & Tasks
-                                </button>
+                                {task.status === 'DRAFT' ? (
+                                  <button 
+                                    onClick={() => handleDelegateToCEO(task.id)}
+                                    disabled={isAnalyzing}
+                                    className="px-3.5 py-1.5 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 shadow-sm shadow-[#8B5CF6]/20"
+                                  >
+                                    {isAnalyzing && selectedTaskId === task.id ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                                    Delegate to CEO
+                                  </button>
+                                ) : (
+                                  <button 
+                                    onClick={() => { setSelectedTaskId(task.id); setActiveTab('CEO Agent'); }}
+                                    className="px-3.5 py-1.5 bg-[#8B5CF6]/15 hover:bg-[#8B5CF6]/25 text-[#8B5CF6] text-xs font-bold rounded-lg transition-colors"
+                                  >
+                                    View Plan & Tasks
+                                  </button>
+                                )}
                               </div>
                             </div>
 
@@ -914,6 +1194,47 @@ export function DashboardPage() {
                   }
 
                   const isAwaitingPlanApproval = currentSelectedTask.status === 'AWAITING_PLAN_APPROVAL' || currentSelectedTask.status === 'CEO_ANALYZING';
+
+                  // SECTION 3.5: DRAFT TASK VIEW (Awaiting user to click "Delegate to CEO")
+                  if (currentSelectedTask.status === 'DRAFT' || (!planObj && currentSelectedTask.status !== 'COMPLETED' && currentSelectedTask.status !== 'APPROVED')) {
+                    return (
+                      <div className="bg-white dark:bg-[#120E1E] border-2 border-dashed border-[#8B5CF6]/40 rounded-3xl p-8 shadow-sm space-y-6">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-gray-200 dark:border-[#251B38]">
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-[10px] font-extrabold uppercase tracking-widest bg-amber-500/15 text-amber-500 px-2.5 py-0.5 rounded-md border border-amber-500/30">
+                                DRAFT DIRECTIVE
+                              </span>
+                              <span className="text-[10px] text-gray-400 font-bold">
+                                Created {currentSelectedTask.date}
+                              </span>
+                            </div>
+                            <h2 className="text-2xl font-black tracking-tight text-gray-900 dark:text-white">{currentSelectedTask.title}</h2>
+                            <p className="text-xs text-gray-500 dark:text-founder-textMuted mt-1">This task is saved in your queue. Click <strong>Delegate to CEO</strong> to formulate a multi-agent strategy and assign departments.</p>
+                          </div>
+
+                          <button
+                            onClick={() => handleDelegateToCEO(currentSelectedTask.id)}
+                            disabled={isAnalyzing}
+                            className="px-6 py-3 bg-[#8B5CF6] hover:bg-[#7C3AED] disabled:bg-gray-300 text-white font-extrabold rounded-xl text-sm flex items-center gap-2 shadow-lg shadow-[#8B5CF6]/25 transition-all shrink-0 cursor-pointer"
+                          >
+                            {isAnalyzing && selectedTaskId === currentSelectedTask.id ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                            <span>{isAnalyzing && selectedTaskId === currentSelectedTask.id ? "Analyzing..." : "Delegate to CEO Agent"}</span>
+                          </button>
+                        </div>
+
+                        <div className="p-5 rounded-2xl bg-gray-50 dark:bg-[#1C162E] border border-gray-200 dark:border-[#2D234A] flex items-center gap-4">
+                          <div className="w-10 h-10 rounded-xl bg-[#8B5CF6]/15 text-[#8B5CF6] flex items-center justify-center font-bold shrink-0">
+                            <Briefcase size={20} />
+                          </div>
+                          <div>
+                            <h4 className="text-sm font-bold text-gray-900 dark:text-white">Autonomous Agent Decomposition</h4>
+                            <p className="text-xs text-gray-500 dark:text-founder-textMuted">When you click <strong>Delegate to CEO Agent</strong>, the CEO Agent will analyze the task, select required departments (Finance, Hiring, Marketing, Legal), formulate dependencies, and await your Level A Plan Approval.</p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
 
                   // SECTION 4: CEO AGENT PLAN SCREEN
                   if (isAwaitingPlanApproval && planObj) {
@@ -1254,41 +1575,331 @@ export function DashboardPage() {
           )}
 
           {/* Sub-Agent Panels (Hiring, Marketing, Finance, Legal) */}
-          {['Hiring Agent', 'Marketing Agent', 'Finance Agent', 'Legal Agent'].includes(activeTab) && (
-            <motion.div
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -15 }}
-              className="space-y-6"
-            >
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-2xl font-bold tracking-tight">{activeTab} Department</h2>
-                  <p className="text-gray-500 dark:text-founder-textMuted text-sm font-medium mt-1">Autonomous worker connected to the CEO orchestration pipeline.</p>
-                </div>
-                <button 
-                  onClick={() => setActiveTab('CEO Agent')}
-                  className="px-5 py-2.5 bg-[#8B5CF6] text-white font-bold rounded-xl text-xs hover:bg-[#7C3AED] transition-colors"
-                >
-                  View Active Directives in CEO Agent
-                </button>
-              </div>
+          {['Hiring Agent', 'Marketing Agent', 'Finance Agent', 'Legal Agent'].includes(activeTab) && (() => {
+            const agentShortName = activeTab.replace(' Agent', '');
+            const del = currentSelectedTask?.delegations?.find((d: any) => d.agent === agentShortName);
+            const config = getAgentConfig(agentShortName);
+            const Icon = config.icon;
 
-              <div className="p-10 border border-dashed border-gray-200 dark:border-[#251B38] rounded-2xl text-center bg-white dark:bg-[#120E1E]">
-                <Bot size={40} className="mx-auto text-[#8B5CF6] mb-3 opacity-60" />
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white">Department Connected to CEO Workflow</h3>
-                <p className="text-xs text-gray-500 max-w-md mx-auto mt-1 mb-4">
-                  In FounderOS, all tasks for {activeTab} are orchestrated through the CEO Agent to maintain context and dependency order.
-                </p>
-                <button 
-                  onClick={() => setActiveTab('CEO Agent')}
-                  className="px-5 py-2.5 bg-gray-100 dark:bg-[#1C162E] hover:bg-gray-200 dark:hover:bg-[#251B38] text-gray-800 dark:text-gray-200 font-bold rounded-xl text-xs"
-                >
-                  Open CEO Control Center
-                </button>
-              </div>
-            </motion.div>
-          )}
+            let resultObj: any = {};
+            try {
+              resultObj = del?.result_output ? JSON.parse(del.result_output) : {};
+            } catch (e) {
+              console.error(e);
+            }
+
+            const isBlocked = del?.status === 'BLOCKED';
+            const isReady = del?.status === 'READY';
+            const isRunning = del?.status === 'RUNNING' || (isRunningAgent && activeWorkspaceDelegation?.id === del?.id);
+            const isAwaitingApproval = del?.status === 'AWAITING_APPROVAL';
+            const isCompleted = del?.status === 'COMPLETED';
+
+            // Find next delegation in sequence for transition hint
+            let nextDelInSeq: any = null;
+            if (currentSelectedTask?.delegations && del) {
+              const sortedDels = [...currentSelectedTask.delegations].sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+              const currIdx = sortedDels.findIndex((d: any) => d.id === del.id);
+              if (currIdx !== -1 && currIdx + 1 < sortedDels.length) {
+                nextDelInSeq = sortedDels[currIdx + 1];
+              }
+            }
+
+            return (
+              <motion.div
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                className="space-y-6 pb-12"
+              >
+                {/* Header */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-bold ${config.bg} ${config.color} border ${config.border}`}>
+                      <Icon size={24} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded border ${config.badge}`}>
+                          {agentShortName} Department
+                        </span>
+                        {del && getStatusBadge(del.status)}
+                      </div>
+                      <h2 className="text-2xl font-black tracking-tight text-gray-900 dark:text-white mt-0.5">
+                        {agentShortName} Agent Workspace
+                      </h2>
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={() => setActiveTab('CEO Agent')}
+                    className="px-4 py-2 bg-gray-100 dark:bg-[#1C162E] hover:bg-gray-200 dark:hover:bg-[#251B38] text-gray-700 dark:text-gray-200 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors shrink-0"
+                  >
+                    <Briefcase size={14} /> View Full CEO Plan
+                  </button>
+                </div>
+
+                {!del ? (
+                  <div className="p-12 border border-dashed border-gray-200 dark:border-[#251B38] rounded-2xl text-center bg-white dark:bg-[#120E1E] space-y-3">
+                    <Bot size={40} className="mx-auto text-gray-400 opacity-60" />
+                    <h3 className="text-lg font-bold text-gray-900 dark:text-white">No Active Tasks Assigned to {agentShortName} Agent</h3>
+                    <p className="text-xs text-gray-500 max-w-md mx-auto">
+                      In the current directive, {agentShortName} Agent is either not required or has not yet been delegated work.
+                    </p>
+                    <button 
+                      onClick={() => setActiveTab('CEO Agent')}
+                      className="px-5 py-2.5 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-bold rounded-xl text-xs transition-colors"
+                    >
+                      Open CEO Directives
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm">
+                    {/* Directive Context Banner */}
+                    <div className="p-4 rounded-2xl bg-gray-50 dark:bg-[#1C162E] border border-gray-200 dark:border-[#2D234A] space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-extrabold text-gray-400 uppercase tracking-wider">
+                          Active Directive • Step {del.order_index}
+                        </span>
+                        <span className="text-[10px] text-gray-400 font-medium">
+                          Directive: <strong>{currentSelectedTask.title}</strong>
+                        </span>
+                      </div>
+                      <p className="text-xs sm:text-sm text-gray-800 dark:text-gray-200 font-medium leading-relaxed">
+                        {del.task_description}
+                      </p>
+                    </div>
+
+                    {/* Permissions Matrix */}
+                    <div className="p-3.5 rounded-xl bg-gray-50/50 dark:bg-[#130B24]/50 border border-gray-200 dark:border-[#251B38] flex flex-wrap items-center gap-4 text-[11px] text-gray-600 dark:text-gray-300">
+                      <span className="text-[10px] font-bold text-gray-400 uppercase">Department Guardrails:</span>
+                      <span className="text-emerald-500 font-semibold">✓ Draft & Analyze</span>
+                      <span className="text-emerald-500 font-semibold">✓ Model Metrics</span>
+                      <span className="text-red-400 font-semibold">✗ No Unapproved External Dispatch</span>
+                    </div>
+
+                    {/* STATE 1: BLOCKED */}
+                    {isBlocked && (
+                      <div className="p-8 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-center space-y-3">
+                        <Lock size={32} className="mx-auto text-amber-500" />
+                        <h4 className="text-base font-bold text-gray-900 dark:text-white">Step {del.order_index} is Blocked by Upstream Dependencies</h4>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 max-w-md mx-auto">
+                          Requires prior dependency ({JSON.parse(del.dependencies || '[]').join(', ') || 'Previous Agent'}) to be completed and approved before this workspace unlocks.
+                        </p>
+                        <button
+                          disabled
+                          className="px-6 py-2.5 bg-gray-300 dark:bg-[#1C162E] text-gray-400 font-bold rounded-xl text-xs cursor-not-allowed"
+                        >
+                          LOCKED (AWAITING PREVIOUS STEP)
+                        </button>
+                      </div>
+                    )}
+
+                    {/* STATE 2: READY TO START */}
+                    {isReady && !isRunning && !isAwaitingApproval && !isCompleted && (
+                      <div className="p-8 rounded-2xl bg-[#00DF89]/10 border-2 border-dashed border-[#00DF89]/40 text-center space-y-4">
+                        <div className="w-14 h-14 rounded-2xl bg-[#00DF89]/20 text-[#00DF89] flex items-center justify-center mx-auto shadow-md shadow-[#00DF89]/10">
+                          <Play size={28} fill="currentColor" />
+                        </div>
+                        <div>
+                          <h4 className="text-lg font-extrabold text-gray-900 dark:text-white">Workspace Ready for Execution</h4>
+                          <p className="text-xs text-gray-500 dark:text-founder-textMuted max-w-md mx-auto mt-1">
+                            All upstream dependencies are satisfied. Click <strong>START TASK</strong> to execute the {del.agent} domain pipeline.
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleStartAgentTask(del.id)}
+                          className="px-8 py-3.5 bg-[#00DF89] hover:bg-[#00DF89]/90 text-gray-950 font-black rounded-xl text-sm shadow-xl shadow-[#00DF89]/25 transition-all flex items-center gap-2 mx-auto cursor-pointer transform hover:scale-105"
+                        >
+                          <Play size={16} fill="currentColor" /> START TASK
+                        </button>
+                      </div>
+                    )}
+
+                    {/* STATE 3: RUNNING */}
+                    {isRunning && (
+                      <div className="p-10 rounded-2xl bg-[#8B5CF6]/10 border border-[#8B5CF6]/30 text-center space-y-4">
+                        <Loader2 size={36} className="mx-auto text-[#8B5CF6] animate-spin" />
+                        <div>
+                          <h4 className="text-base font-bold text-gray-900 dark:text-white">Executing {del.agent} Pipeline...</h4>
+                          <p className="text-xs text-gray-500 dark:text-founder-textMuted mt-1">
+                            Gathering inputs, modeling quantitative bounds, and generating deliverable...
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* STATE 4 & 5: DELIVERABLE (AWAITING APPROVAL OR COMPLETED) */}
+                    {(isAwaitingApproval || isCompleted) && (
+                      <div className="space-y-6 pt-2">
+                        {/* Decision Summary */}
+                        {del.decision_summary && (
+                          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 space-y-1">
+                            <p className="text-[10px] font-extrabold text-emerald-500 uppercase tracking-wider flex items-center gap-1.5">
+                              <CheckCircle2 size={14} /> Agent Decision Summary
+                            </p>
+                            <p className="text-xs sm:text-sm text-gray-800 dark:text-gray-200 font-medium leading-relaxed">
+                              {del.decision_summary}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Finance Deliverable */}
+                        {del.agent === 'Finance' && resultObj.salary_range && (
+                          <div className="p-5 rounded-2xl bg-gray-50 dark:bg-[#1C162E] border border-gray-200 dark:border-[#2D234A] space-y-4">
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">Compensation & Runway Assessment</h4>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                              <div className="p-3 bg-white dark:bg-[#120E1E] rounded-xl border border-gray-200 dark:border-[#251B38]">
+                                <p className="text-[10px] text-gray-400">Recommended Role</p>
+                                <p className="text-xs font-bold text-gray-900 dark:text-white">{resultObj.recommended_role}</p>
+                              </div>
+                              <div className="p-3 bg-white dark:bg-[#120E1E] rounded-xl border border-gray-200 dark:border-[#251B38]">
+                                <p className="text-[10px] text-gray-400">Recommended Salary Band</p>
+                                <p className="text-xs font-bold text-emerald-500">{resultObj.salary_range}</p>
+                              </div>
+                              <div className="p-3 bg-white dark:bg-[#120E1E] rounded-xl border border-gray-200 dark:border-[#251B38]">
+                                <p className="text-[10px] text-gray-400">Hiring Budget Ceiling</p>
+                                <p className="text-xs font-bold text-[#3B82F6]">{resultObj.hiring_budget}</p>
+                              </div>
+                            </div>
+                            <div className="text-xs text-gray-600 dark:text-gray-300 space-y-1 pt-1">
+                              <p>• <strong>Financial Assessment:</strong> <span className="text-emerald-500 font-bold">{resultObj.financial_assessment}</span></p>
+                              <p>• <strong>Runway Impact:</strong> {resultObj.runway_impact}</p>
+                              <p>• <strong>Rationale:</strong> {resultObj.reason}</p>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Marketing Deliverable */}
+                        {del.agent === 'Marketing' && resultObj.linkedin_post && (
+                          <div className="space-y-4">
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">Generated Campaign Collateral</h4>
+                            <div className="space-y-2">
+                              <div className="flex justify-between items-center text-xs font-bold text-gray-700 dark:text-gray-300">
+                                <span>LinkedIn Launch Post</span>
+                                <button 
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(resultObj.linkedin_post);
+                                    setCopiedText(true);
+                                    setTimeout(() => setCopiedText(false), 2000);
+                                  }}
+                                  className="text-[11px] text-[#8B5CF6] hover:underline flex items-center gap-1"
+                                >
+                                  {copiedText ? <Check size={12} /> : <Copy size={12} />} Copy
+                                </button>
+                              </div>
+                              <pre className="bg-gray-900 text-gray-100 p-4 rounded-2xl text-xs font-sans whitespace-pre-wrap leading-relaxed border border-gray-800">
+                                {resultObj.linkedin_post}
+                              </pre>
+                            </div>
+                            {resultObj.telegram_post && (
+                              <div className="space-y-2">
+                                <span className="text-xs font-bold text-gray-700 dark:text-gray-300">Telegram Channel Broadcast</span>
+                                <pre className="bg-gray-900 text-gray-100 p-4 rounded-2xl text-xs font-sans whitespace-pre-wrap leading-relaxed border border-gray-800">
+                                  {resultObj.telegram_post}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Hiring Deliverable */}
+                        {del.agent === 'Hiring' && resultObj.candidates && (
+                          <div className="space-y-4">
+                            <div className="flex justify-between items-center">
+                              <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">Shortlisted & Ranked Candidate Leaderboard</h4>
+                              <span className="text-xs font-bold text-emerald-500">{resultObj.candidates.length} Applicants Evaluated</span>
+                            </div>
+                            <div className="space-y-3">
+                              {resultObj.candidates.map((cand: any, i: number) => (
+                                <div 
+                                  key={cand.id || i}
+                                  onClick={() => setSelectedCandidate(cand.name)}
+                                  className={`p-4 rounded-2xl border transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                                    selectedCandidate === cand.name 
+                                      ? 'bg-[#8B5CF6]/10 border-[#8B5CF6] shadow-md shadow-[#8B5CF6]/10' 
+                                      : 'bg-gray-50 dark:bg-[#1C162E] border-gray-200 dark:border-[#2D234A]'
+                                  }`}
+                                >
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="w-5 h-5 rounded-full bg-[#8B5CF6] text-white text-xs font-bold flex items-center justify-center">{i + 1}</span>
+                                      <h5 className="font-bold text-sm text-gray-900 dark:text-white">{cand.name}</h5>
+                                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-500">
+                                        Match: {cand.match_score}%
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-gray-500">{cand.experience} • {cand.current_company} • Expected: {cand.expected_salary}</p>
+                                    <p className="text-[11px] text-gray-700 dark:text-gray-300 italic">{cand.interview_recommendation}</p>
+                                  </div>
+                                  <span className={`text-xs font-bold px-3 py-1.5 rounded-xl ${selectedCandidate === cand.name ? 'bg-[#8B5CF6] text-white' : 'bg-gray-200 dark:bg-[#120E1E] text-gray-600 dark:text-gray-400'}`}>
+                                    {selectedCandidate === cand.name ? 'Selected for Offer' : 'Select'}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Legal Deliverable */}
+                        {del.agent === 'Legal' && resultObj.offer_text && (
+                          <div className="space-y-3">
+                            <div className="flex justify-between items-center text-xs font-bold">
+                              <span className="text-gray-400 uppercase">Employment Offer Letter Ready</span>
+                              <span className="text-emerald-500">Target Candidate: {resultObj.candidate_name}</span>
+                            </div>
+                            <pre className="bg-gray-900 text-gray-100 p-5 rounded-2xl text-xs font-sans whitespace-pre-wrap leading-relaxed border border-gray-800 max-h-60 overflow-y-auto">
+                              {resultObj.offer_text}
+                            </pre>
+                          </div>
+                        )}
+
+                        {/* Actions Bar */}
+                        <div className="pt-5 border-t border-gray-200 dark:border-[#251B38] flex flex-col sm:flex-row items-center justify-between gap-4">
+                          <div>
+                            <h5 className="text-xs font-extrabold text-gray-900 dark:text-white">
+                              {isAwaitingApproval ? 'Level B Result Authorization Required' : 'Step Complete & Verified'}
+                            </h5>
+                            <p className="text-[11px] text-gray-400">
+                              {isAwaitingApproval ? 'Review the deliverable above before authorizing downstream execution.' : 'Deliverable verified. Downstream tasks unlocked.'}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-3 w-full sm:w-auto">
+                            {isAwaitingApproval && (
+                              <button
+                                onClick={() => handleApproveAgentResult(del.id)}
+                                className="w-full sm:w-auto px-6 py-3 bg-[#00DF89] hover:bg-[#00DF89]/90 text-gray-950 font-black rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-[#00DF89]/25 transition-all cursor-pointer transform hover:scale-105"
+                              >
+                                <CheckCircle2 size={16} /> [ APPROVE RESULT ]
+                              </button>
+                            )}
+
+                            {isCompleted && nextDelInSeq && (
+                              <button
+                                onClick={() => setActiveTab(`${nextDelInSeq.agent} Agent`)}
+                                className="w-full sm:w-auto px-6 py-3 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md shadow-[#8B5CF6]/20 transition-all cursor-pointer"
+                              >
+                                Proceed to Next Agent ({nextDelInSeq.agent}) <ArrowRight size={14} />
+                              </button>
+                            )}
+
+                            {isCompleted && !nextDelInSeq && (
+                              <button
+                                onClick={() => setActiveTab('CEO Agent')}
+                                className="w-full sm:w-auto px-6 py-3 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                              >
+                                View Final in CEO Control Center <ArrowRight size={14} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </motion.div>
+            );
+          })()}
 
           {/* Fallback for other tabs */}
           {activeTab !== 'Dashboard' && activeTab !== 'Goals' && activeTab !== 'Tasks' && activeTab !== 'CEO Agent' && activeTab !== 'Audit Logs' && !['Hiring Agent', 'Marketing Agent', 'Finance Agent', 'Legal Agent'].includes(activeTab) && (
@@ -1628,6 +2239,79 @@ export function DashboardPage() {
               </div>
             );
           })()
+        )}
+      </AnimatePresence>
+
+      {/* BIG GREEN "APPROVED" SUCCESS POPUP MODAL */}
+      <AnimatePresence>
+        {approvedModalData && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={handleDoneApprovalModal}
+              className="absolute inset-0 bg-gray-950/80 backdrop-blur-md"
+            />
+            
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.85, y: 30 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.85, y: 30 }}
+              transition={{ type: "spring", stiffness: 300, damping: 25 }}
+              className="relative w-full max-w-md bg-white dark:bg-[#120E1E] border-2 border-[#00DF89] rounded-3xl p-8 sm:p-10 z-10 shadow-[0_0_60px_rgba(0,223,137,0.3)] text-center space-y-6"
+            >
+              {/* Big Animated Glowing Green Check Icon */}
+              <div className="relative mx-auto w-24 h-24 flex items-center justify-center">
+                <div className="absolute inset-0 rounded-full bg-[#00DF89]/20 animate-ping opacity-75" />
+                <div className="relative w-20 h-20 rounded-full bg-[#00DF89] text-gray-950 flex items-center justify-center shadow-lg shadow-[#00DF89]/40">
+                  <Check size={44} strokeWidth={3.5} />
+                </div>
+              </div>
+
+              {/* Big Green "Approved" Title */}
+              <div className="space-y-2">
+                <h2 className="text-4xl sm:text-5xl font-black text-[#00DF89] tracking-tight uppercase">
+                  Approved
+                </h2>
+                <p className="text-base font-bold text-gray-900 dark:text-white">
+                  {approvedModalData.agent} Agent Deliverable Authorized
+                </p>
+                <p className="text-xs text-gray-500 dark:text-founder-textMuted max-w-sm mx-auto">
+                  {approvedModalData.nextAgent 
+                    ? `Step ${approvedModalData.stepOrder} is complete. Next workstream (${approvedModalData.nextAgent} Agent) has been unlocked and is ready to start.`
+                    : `All multi-agent execution steps in this directive have been successfully completed!`}
+                </p>
+              </div>
+
+              {/* Next Step Preview Badge */}
+              {approvedModalData.nextAgent && (
+                <div className="p-4 rounded-2xl bg-gray-50 dark:bg-[#1C162E] border border-gray-200 dark:border-[#2D234A] flex items-center justify-between text-left">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-[#8B5CF6]/15 text-[#8B5CF6] flex items-center justify-center font-bold text-xs">
+                      <Sparkles size={16} />
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-extrabold uppercase text-gray-400">Next Department</p>
+                      <p className="text-xs font-bold text-gray-900 dark:text-white">{approvedModalData.nextAgent} Agent</p>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-[#00DF89]/15 text-[#00DF89] border border-[#00DF89]/30">
+                    UNLOCKED ✓
+                  </span>
+                </div>
+              )}
+
+              {/* Prominent Done Button */}
+              <button
+                onClick={handleDoneApprovalModal}
+                className="w-full py-4 bg-[#00DF89] hover:bg-[#00DF89]/90 text-gray-950 font-black rounded-2xl text-base shadow-xl shadow-[#00DF89]/30 transition-all transform hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+              >
+                <span>Done</span>
+                <ArrowRight size={18} />
+              </button>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
