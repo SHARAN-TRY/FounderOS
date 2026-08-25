@@ -75,6 +75,7 @@ export function DashboardPage() {
     stepOrder: number;
     nextAgent?: string;
     isAllComplete?: boolean;
+    isRejected?: boolean;
   } | null>(null);
 
   // Global Search state & refs
@@ -251,14 +252,10 @@ export function DashboardPage() {
         setSelectedTaskId(updatedTask.id);
         await fetchDashboardData();
 
-        // Directly navigate to the first agent option on the left sidebar
-        const firstDel = updatedTask.delegations?.find((d: any) => d.status === 'READY') || updatedTask.delegations?.[0];
-        if (firstDel && firstDel.agent) {
-          const agentTab = firstDel.agent.endsWith('Agent') ? firstDel.agent : `${firstDel.agent} Agent`;
-          setActiveTab(agentTab);
-          setActionSuccessMessage(`✓ Plan approved! Directing to Step 1: ${agentTab}`);
-          setTimeout(() => setActionSuccessMessage(null), 3500);
-        }
+        // Redirect to CEO Agent view where individual agent plans can be viewed
+        setActiveTab('CEO Agent');
+        setActionSuccessMessage(`✓ Plan approved! Redirected to CEO Agent to view individual agent plans.`);
+        setTimeout(() => setActionSuccessMessage(null), 3500);
       }
     } catch (err) {
       console.error('Failed to approve plan:', err);
@@ -360,23 +357,43 @@ export function DashboardPage() {
     }
   };
 
-  // 5b. Done Action on Big Green "Approved" Modal -> Redirect to Next Agent or CEO Agent
-  const handleDoneApprovalModal = () => {
-    if (!approvedModalData) return;
+  // 5b. Reject Agent Task Result
+  const handleRejectAgentResult = async (delegationId: number, feedback: string = 'Task result rejected by founder.') => {
+    const token = localStorage.getItem('token');
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-    const nextAgentName = approvedModalData.nextAgent;
-    setApprovedModalData(null);
+    try {
+      const res = await fetch(`${apiUrl}/api/agent-tasks/${delegationId}/revise`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ feedback })
+      });
 
-    if (nextAgentName) {
-      const nextTabName = nextAgentName.endsWith('Agent') ? nextAgentName : `${nextAgentName} Agent`;
-      setActiveTab(nextTabName);
-      setActionSuccessMessage(`✓ Unlocked Step: ${nextTabName} task is ready for execution!`);
-      setTimeout(() => setActionSuccessMessage(null), 3500);
-    } else {
-      setActiveTab('CEO Agent');
-      setActionSuccessMessage(`🎉 All workstreams completed and verified!`);
-      setTimeout(() => setActionSuccessMessage(null), 4000);
+      if (res.ok) {
+        const updatedDel = await res.json();
+        setActiveWorkspaceDelegation(null);
+        await fetchDashboardData();
+
+        setApprovedModalData({
+          agent: updatedDel.agent,
+          stepOrder: updatedDel.order_index || 1,
+          isRejected: true
+        });
+      }
+    } catch (err) {
+      console.error('Failed to reject agent task:', err);
     }
+  };
+
+  // 5c. Done Action on Modal -> Always Redirect to CEO Agent
+  const handleDoneApprovalModal = () => {
+    setApprovedModalData(null);
+    setActiveTab('CEO Agent');
+    setActionSuccessMessage(`✓ Redirected to CEO Agent workspace.`);
+    setTimeout(() => setActionSuccessMessage(null), 3500);
   };
 
   // 6. Level C Approval: Consequential Action Authorization
@@ -1445,8 +1462,17 @@ export function DashboardPage() {
                                     </div>
                                     <p className="text-[11px] text-gray-500 line-clamp-2 leading-snug">{del.task_description}</p>
                                     <div className="mt-3 pt-2 border-t border-gray-100 dark:border-[#251B38]/60 flex items-center justify-between">
-                                      {getStatusBadge(del.status)}
-                                      <span className="text-[10px] text-[#8B5CF6] font-bold hover:underline">Open &rarr;</span>
+                                        {getStatusBadge(del.status)}
+                                        <button 
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const agentTab = del.agent.endsWith('Agent') ? del.agent : `${del.agent} Agent`;
+                                            setActiveTab(agentTab);
+                                          }}
+                                          className="text-[11px] font-bold text-white bg-[#8B5CF6] hover:bg-[#7C3AED] px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 shadow-sm cursor-pointer"
+                                        >
+                                          View Task &rarr;
+                                        </button>
                                     </div>
                                   </div>
                                 </div>
@@ -1500,10 +1526,13 @@ export function DashboardPage() {
                                   </div>
 
                                   <button
-                                    onClick={() => setActiveWorkspaceDelegation(del)}
-                                    className="w-full py-2.5 px-4 bg-gray-100 dark:bg-[#1C162E] hover:bg-[#8B5CF6] hover:text-white text-gray-800 dark:text-gray-200 font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-2"
+                                    onClick={() => {
+                                      const agentTab = del.agent.endsWith('Agent') ? del.agent : `${del.agent} Agent`;
+                                      setActiveTab(agentTab);
+                                    }}
+                                    className="w-full py-2.5 px-4 bg-gray-100 dark:bg-[#1C162E] hover:bg-[#8B5CF6] hover:text-white text-gray-800 dark:text-gray-200 font-bold rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
                                   >
-                                    <Eye size={14} /> OPEN TASK
+                                    <Eye size={14} /> View Task
                                   </button>
                                 </div>
                               </div>
@@ -1592,15 +1621,7 @@ export function DashboardPage() {
             const isAwaitingApproval = del?.status === 'AWAITING_APPROVAL';
             const isCompleted = del?.status === 'COMPLETED';
 
-            // Find next delegation in sequence for transition hint
-            let nextDelInSeq: any = null;
-            if (currentSelectedTask?.delegations && del) {
-              const sortedDels = [...currentSelectedTask.delegations].sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
-              const currIdx = sortedDels.findIndex((d: any) => d.id === del.id);
-              if (currIdx !== -1 && currIdx + 1 < sortedDels.length) {
-                nextDelInSeq = sortedDels[currIdx + 1];
-              }
-            }
+
 
             return (
               <motion.div
@@ -1855,38 +1876,37 @@ export function DashboardPage() {
                         <div className="pt-5 border-t border-gray-200 dark:border-[#251B38] flex flex-col sm:flex-row items-center justify-between gap-4">
                           <div>
                             <h5 className="text-xs font-extrabold text-gray-900 dark:text-white">
-                              {isAwaitingApproval ? 'Level B Result Authorization Required' : 'Step Complete & Verified'}
+                              {isAwaitingApproval ? 'Level B Result Authorization Required' : isCompleted ? 'Step Complete & Verified' : 'Departmental Task Action'}
                             </h5>
                             <p className="text-[11px] text-gray-400">
-                              {isAwaitingApproval ? 'Review the deliverable above before authorizing downstream execution.' : 'Deliverable verified. Downstream tasks unlocked.'}
+                              {isAwaitingApproval ? 'Review the deliverable above before approving or rejecting.' : 'Review task results or return to CEO Agent.'}
                             </p>
                           </div>
 
                           <div className="flex items-center gap-3 w-full sm:w-auto">
                             {isAwaitingApproval && (
-                              <button
-                                onClick={() => handleApproveAgentResult(del.id)}
-                                className="w-full sm:w-auto px-6 py-3 bg-[#00DF89] hover:bg-[#00DF89]/90 text-gray-950 font-black rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-[#00DF89]/25 transition-all cursor-pointer transform hover:scale-105"
-                              >
-                                <CheckCircle2 size={16} /> [ APPROVE RESULT ]
-                              </button>
+                              <>
+                                <button
+                                  onClick={() => handleRejectAgentResult(del.id)}
+                                  className="w-full sm:w-auto px-5 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-500 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                                >
+                                  [ REJECT TASK ]
+                                </button>
+                                <button
+                                  onClick={() => handleApproveAgentResult(del.id)}
+                                  className="w-full sm:w-auto px-6 py-3 bg-[#00DF89] hover:bg-[#00DF89]/90 text-gray-950 font-black rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-[#00DF89]/25 transition-all cursor-pointer transform hover:scale-105"
+                                >
+                                  <CheckCircle2 size={16} /> [ APPROVE TASK ]
+                                </button>
+                              </>
                             )}
 
-                            {isCompleted && nextDelInSeq && (
-                              <button
-                                onClick={() => setActiveTab(`${nextDelInSeq.agent} Agent`)}
-                                className="w-full sm:w-auto px-6 py-3 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md shadow-[#8B5CF6]/20 transition-all cursor-pointer"
-                              >
-                                Proceed to Next Agent ({nextDelInSeq.agent}) <ArrowRight size={14} />
-                              </button>
-                            )}
-
-                            {isCompleted && !nextDelInSeq && (
+                            {(isCompleted || del.status === 'NEEDS_REVISION' || isAwaitingApproval || isReady) && (
                               <button
                                 onClick={() => setActiveTab('CEO Agent')}
-                                className="w-full sm:w-auto px-6 py-3 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                                className="w-full sm:w-auto px-6 py-3 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md shadow-[#8B5CF6]/20"
                               >
-                                View Final in CEO Control Center <ArrowRight size={14} />
+                                Done <ArrowRight size={14} />
                               </button>
                             )}
                           </div>
@@ -2743,7 +2763,7 @@ export function DashboardPage() {
         )}
       </AnimatePresence>
 
-      {/* BIG GREEN "APPROVED" SUCCESS POPUP MODAL */}
+      {/* BIG "APPROVED" / "REJECTED" SUCCESS POPUP MODAL */}
       <AnimatePresence>
         {approvedModalData && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -2760,53 +2780,41 @@ export function DashboardPage() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.85, y: 30 }}
               transition={{ type: "spring", stiffness: 300, damping: 25 }}
-              className="relative w-full max-w-md bg-white dark:bg-[#120E1E] border-2 border-[#00DF89] rounded-3xl p-8 sm:p-10 z-10 shadow-[0_0_60px_rgba(0,223,137,0.3)] text-center space-y-6"
+              className={`relative w-full max-w-md bg-white dark:bg-[#120E1E] border-2 ${
+                approvedModalData.isRejected ? 'border-red-500 shadow-[0_0_60px_rgba(239,68,68,0.3)]' : 'border-[#00DF89] shadow-[0_0_60px_rgba(0,223,137,0.3)]'
+              } rounded-3xl p-8 sm:p-10 z-10 text-center space-y-6`}
             >
-              {/* Big Animated Glowing Green Check Icon */}
+              {/* Animated Glowing Icon */}
               <div className="relative mx-auto w-24 h-24 flex items-center justify-center">
-                <div className="absolute inset-0 rounded-full bg-[#00DF89]/20 animate-ping opacity-75" />
-                <div className="relative w-20 h-20 rounded-full bg-[#00DF89] text-gray-950 flex items-center justify-center shadow-lg shadow-[#00DF89]/40">
-                  <Check size={44} strokeWidth={3.5} />
+                <div className={`absolute inset-0 rounded-full ${approvedModalData.isRejected ? 'bg-red-500/20' : 'bg-[#00DF89]/20'} animate-ping opacity-75`} />
+                <div className={`relative w-20 h-20 rounded-full ${
+                  approvedModalData.isRejected ? 'bg-red-500 text-white shadow-lg shadow-red-500/40' : 'bg-[#00DF89] text-gray-950 shadow-lg shadow-[#00DF89]/40'
+                } flex items-center justify-center`}>
+                  {approvedModalData.isRejected ? <X size={44} strokeWidth={3.5} /> : <Check size={44} strokeWidth={3.5} />}
                 </div>
               </div>
 
-              {/* Big Green "Approved" Title */}
+              {/* Title */}
               <div className="space-y-2">
-                <h2 className="text-4xl sm:text-5xl font-black text-[#00DF89] tracking-tight uppercase">
-                  Approved
+                <h2 className={`text-4xl sm:text-5xl font-black ${approvedModalData.isRejected ? 'text-red-500' : 'text-[#00DF89]'} tracking-tight uppercase`}>
+                  {approvedModalData.isRejected ? 'Rejected' : 'Approved'}
                 </h2>
                 <p className="text-base font-bold text-gray-900 dark:text-white">
-                  {approvedModalData.agent} Agent Deliverable Authorized
+                  {approvedModalData.agent} Agent Task {approvedModalData.isRejected ? 'Rejected' : 'Authorized'}
                 </p>
                 <p className="text-xs text-gray-500 dark:text-founder-textMuted max-w-sm mx-auto">
-                  {approvedModalData.nextAgent 
-                    ? `Step ${approvedModalData.stepOrder} is complete. Next workstream (${approvedModalData.nextAgent} Agent) has been unlocked and is ready to start.`
-                    : `All multi-agent execution steps in this directive have been successfully completed!`}
+                  {approvedModalData.isRejected 
+                    ? `${approvedModalData.agent} Agent task marked for revision. Returning to CEO Agent.`
+                    : `${approvedModalData.agent} Agent task has been completed and verified.`}
                 </p>
               </div>
 
-              {/* Next Step Preview Badge */}
-              {approvedModalData.nextAgent && (
-                <div className="p-4 rounded-2xl bg-gray-50 dark:bg-[#1C162E] border border-gray-200 dark:border-[#2D234A] flex items-center justify-between text-left">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-xl bg-[#8B5CF6]/15 text-[#8B5CF6] flex items-center justify-center font-bold text-xs">
-                      <Sparkles size={16} />
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-extrabold uppercase text-gray-400">Next Department</p>
-                      <p className="text-xs font-bold text-gray-900 dark:text-white">{approvedModalData.nextAgent} Agent</p>
-                    </div>
-                  </div>
-                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-[#00DF89]/15 text-[#00DF89] border border-[#00DF89]/30">
-                    UNLOCKED ✓
-                  </span>
-                </div>
-              )}
-
-              {/* Prominent Done Button */}
+              {/* Prominent Done Button -> Redirects to CEO Agent */}
               <button
                 onClick={handleDoneApprovalModal}
-                className="w-full py-4 bg-[#00DF89] hover:bg-[#00DF89]/90 text-gray-950 font-black rounded-2xl text-base shadow-xl shadow-[#00DF89]/30 transition-all transform hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+                className={`w-full py-4 ${
+                  approvedModalData.isRejected ? 'bg-red-500 hover:bg-red-600 text-white shadow-red-500/30' : 'bg-[#00DF89] hover:bg-[#00DF89]/90 text-gray-950 shadow-[#00DF89]/30'
+                } font-black rounded-2xl text-base shadow-xl transition-all transform hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2`}
               >
                 <span>Done</span>
                 <ArrowRight size={18} />
