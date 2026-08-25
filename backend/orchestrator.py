@@ -347,10 +347,10 @@ class CEOOrchestrator:
         )
         db.add(appr)
 
-        # Find delegations with empty dependencies and set them to READY
-        for del_item in task.delegations:
-            deps = json.loads(del_item.dependencies or "[]")
-            if len(deps) == 0:
+        # Strict sequential order: sort delegations by order_index and unlock only step 1
+        sorted_dels = sorted(task.delegations, key=lambda d: d.order_index or 0)
+        for idx, del_item in enumerate(sorted_dels):
+            if idx == 0:
                 del_item.status = "READY"
             else:
                 del_item.status = "BLOCKED"
@@ -522,15 +522,16 @@ class CEOOrchestrator:
         )
         db.add(appr)
 
-        # Check all other delegations to unlock next dependent tasks
-        completed_agents = {d.agent for d in task.delegations if d.status == "COMPLETED" or d.id == delegation.id}
+        # Strict sequential order: unlock the immediate next delegation by order_index
+        sorted_dels = sorted(task.delegations, key=lambda d: d.order_index or 0)
+        current_idx = -1
+        for idx, d in enumerate(sorted_dels):
+            if d.id == delegation.id:
+                current_idx = idx
+                break
         
-        for d in task.delegations:
-            if d.id != delegation.id and d.status == "BLOCKED":
-                deps = json.loads(d.dependencies or "[]")
-                # If all dependencies are in completed_agents, unlock to READY!
-                if all(dep in completed_agents for dep in deps):
-                    d.status = "READY"
+        if current_idx != -1 and current_idx + 1 < len(sorted_dels):
+            sorted_dels[current_idx + 1].status = "READY"
 
         # Recalculate task progress
         total_dels = len(task.delegations)
@@ -543,12 +544,34 @@ class CEOOrchestrator:
             task.status = "COMPLETED"
             task.progress = 100
 
+            # Requirement 3: Archive completed task in Memory Store
+            try:
+                mem = models.MemoryStore(
+                    user_id=user_id,
+                    agent_name="CEO",
+                    session_id=f"task_{task.id}",
+                    memory_type="TASK_ARCHIVE",
+                    context_key=task.title,
+                    context_value=json.dumps({
+                        "task_id": task.id,
+                        "title": task.title,
+                        "summary": task.summary or f"Execution fully approved across all {total_dels} specialized agent stages.",
+                        "date": task.date or datetime.now().strftime("%b %d, %Y"),
+                        "status": "Approved",
+                        "progress": 100,
+                        "completed_at": datetime.utcnow().isoformat()
+                    })
+                )
+                db.add(mem)
+            except Exception as e:
+                print("Memory archival error:", e)
+
         audit = models.AuditLog(
             task_id=task.id,
             agent_name=f"{delegation.agent} Agent",
             action_type="APPROVAL",
             summary=f"Founder approved {delegation.agent} Agent result. Downstream dependencies evaluated.",
-            details=json.dumps({"completed_agents": list(completed_agents), "overall_progress": task.progress}),
+            details=json.dumps({"current_step": delegation.order_index, "overall_progress": task.progress}),
             user_id=user_id
         )
         db.add(audit)

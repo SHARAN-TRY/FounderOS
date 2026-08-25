@@ -432,7 +432,6 @@ export function DashboardPage() {
         { name: 'Legal Agent', icon: <Scale size={16} /> }
       ]
     },
-    { name: 'Workflow', icon: <GitBranch size={18} /> },
     { name: 'Memory', icon: <Cpu size={18} /> },
     { name: 'Approvals', icon: <CheckSquare size={18} /> },
     { name: 'Executions', icon: <Play size={18} /> },
@@ -455,7 +454,6 @@ export function DashboardPage() {
     { name: 'Marketing Agent', category: 'AI Workforce', description: 'Go-to-market strategies, campaign models & viral social copy', tab: 'Marketing Agent', icon: Megaphone },
     { name: 'Finance Agent', category: 'AI Workforce', description: 'Runway calculations, burn rate models & pricing strategies', tab: 'Finance Agent', icon: DollarSign },
     { name: 'Legal Agent', category: 'AI Workforce', description: 'Contracts, offer letters, NDAs & IP assignments', tab: 'Legal Agent', icon: Scale },
-    { name: 'Workflow', category: 'System Architecture', description: 'Graph execution records & multi-agent DAG pipelines', tab: 'Workflow', icon: GitBranch },
     { name: 'Memory', category: 'System Architecture', description: 'Conversational context & cross-session memory store', tab: 'Memory', icon: Cpu },
     { name: 'Approvals', category: 'Governance', description: 'Human-in-the-loop plan, result & action authorization gates', tab: 'Approvals', icon: CheckSquare },
     { name: 'Executions', category: 'System Architecture', description: 'Step-by-step audit logs, runtimes & token metrics', tab: 'Executions', icon: Play },
@@ -1901,17 +1899,520 @@ export function DashboardPage() {
             );
           })()}
 
-          {/* Fallback for other tabs */}
-          {activeTab !== 'Dashboard' && activeTab !== 'Goals' && activeTab !== 'Tasks' && activeTab !== 'CEO Agent' && activeTab !== 'Audit Logs' && !['Hiring Agent', 'Marketing Agent', 'Finance Agent', 'Legal Agent'].includes(activeTab) && (
+          {/* REQUIREMENT 3: GLOBAL TASK MEMORY ARCHIVAL TAB */}
+          {activeTab === 'Memory' && (() => {
+            const completedTasks = tasksList.filter(t => t.status === 'COMPLETED' || (t.progress || 0) === 100);
+
+            return (
+              <motion.div
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                className="space-y-6"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-500 border border-emerald-500/30">
+                        GLOBAL MEMORY LEDGER
+                      </span>
+                      <span className="text-xs text-gray-400 font-mono">
+                        {completedTasks.length} Archived Directives
+                      </span>
+                    </div>
+                    <h2 className="text-2xl font-black tracking-tight text-gray-900 dark:text-white mt-1">
+                      Task Memory & Knowledge Store
+                    </h2>
+                    <p className="text-xs text-gray-500 dark:text-founder-textMuted mt-1">
+                      Permanent, immutable archival of all completed and approved multi-agent directives across the operating system.
+                    </p>
+                  </div>
+
+                  <button 
+                    onClick={() => fetchDashboardData()}
+                    className="px-4 py-2 bg-gray-100 dark:bg-[#1C162E] hover:bg-gray-200 dark:hover:bg-[#251B38] text-gray-700 dark:text-gray-200 font-bold rounded-xl text-xs flex items-center gap-1.5 transition-colors shrink-0"
+                  >
+                    <RefreshCw size={14} /> Refresh Memory
+                  </button>
+                </div>
+
+                {/* 2-Column Table: Column 1 = Task, Column 2 = Result */}
+                <div className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-3xl overflow-hidden shadow-sm">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs font-sans">
+                      <thead className="bg-gray-50 dark:bg-[#1C162E] border-b border-gray-200 dark:border-[#251B38] text-[10px] uppercase font-bold text-gray-400 tracking-wider">
+                        <tr>
+                          <th className="p-5 w-2/3">Task</th>
+                          <th className="p-5 w-1/3">Result</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-[#251B38]/50">
+                        {completedTasks.length === 0 ? (
+                          <tr>
+                            <td colSpan={2} className="p-12 text-center">
+                              <Cpu size={40} className="mx-auto text-gray-400 opacity-60 mb-3" />
+                              <h4 className="text-sm font-bold text-gray-900 dark:text-white">No Fully Completed Tasks in Memory Yet</h4>
+                              <p className="text-xs text-gray-500 dark:text-founder-textMuted max-w-md mx-auto mt-1">
+                                When a multi-agent directive executes through all sequential agent stages and receives final approval, it will be automatically recorded here.
+                              </p>
+                            </td>
+                          </tr>
+                        ) : (
+                          completedTasks.map((t) => {
+                            const dels = t.delegations || [];
+                            return (
+                              <tr key={t.id} className="hover:bg-gray-50/50 dark:hover:bg-[#1C162E]/50 transition-colors">
+                                {/* Column 1: Task */}
+                                <td className="p-5 align-top space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#8B5CF6]/15 text-[#8B5CF6]">
+                                      #{t.id}
+                                    </span>
+                                    <h4 className="text-sm font-extrabold text-gray-900 dark:text-white">
+                                      {t.title}
+                                    </h4>
+                                  </div>
+                                  <p className="text-xs text-gray-600 dark:text-gray-300 font-medium leading-relaxed max-w-xl">
+                                    {t.summary || t.task_description || 'Autonomous multi-agent execution pipeline.'}
+                                  </p>
+                                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                                    <span className="text-[10px] text-gray-400">Created: {t.date || 'Recent'}</span>
+                                    <span className="text-gray-300 dark:text-gray-600">•</span>
+                                    <span className="text-[10px] text-gray-400 font-semibold">Participating Stages:</span>
+                                    {dels.map((d: any, i: number) => (
+                                      <span key={i} className="px-2 py-0.5 rounded text-[10px] font-semibold bg-gray-100 dark:bg-[#1C162E] text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-[#2D234A]">
+                                        {d.agent} ✓
+                                      </span>
+                                    ))}
+                                  </div>
+                                </td>
+
+                                {/* Column 2: Result */}
+                                <td className="p-5 align-top space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="px-3 py-1 rounded-full text-xs font-black bg-[#00DF89]/15 text-[#00DF89] border border-[#00DF89]/30 flex items-center gap-1.5 shadow-sm shadow-[#00DF89]/10">
+                                      <CheckCircle2 size={14} /> Approved
+                                    </span>
+                                    <span className="text-[11px] font-bold text-gray-400 font-mono">
+                                      100% Complete
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-gray-500 dark:text-founder-textMuted">
+                                    All {dels.length > 0 ? dels.length : '4'} sequential agent workstreams verified and authorized by Founder governance gates.
+                                  </p>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })()}
+
+          {/* REQUIREMENT 4: EXECUTIONS VIEW TAB */}
+          {activeTab === 'Executions' && (() => {
+            const inProgressTasks = tasksList.filter(t => t.status !== 'COMPLETED' && t.status !== 'REJECTED' && (t.progress || 0) < 100);
+
+            return (
+              <motion.div
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                className="space-y-8"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-[#8B5CF6]/15 text-[#8B5CF6] border border-[#8B5CF6]/30">
+                        LIVE ORCHESTRATION
+                      </span>
+                      <span className="text-xs text-gray-400 font-mono">
+                        {inProgressTasks.length} Directives In Progress
+                      </span>
+                    </div>
+                    <h2 className="text-2xl font-black tracking-tight text-gray-900 dark:text-white mt-1">
+                      Active Executions & Task Pipeline
+                    </h2>
+                    <p className="text-xs text-gray-500 dark:text-founder-textMuted mt-1">
+                      Track tasks still in progress, active agent stage execution, and sequential pipeline statuses.
+                    </p>
+                  </div>
+
+                  <button 
+                    onClick={() => setActiveTab('CEO Agent')}
+                    className="px-5 py-2.5 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-bold rounded-xl text-xs transition-colors shrink-0 flex items-center gap-2"
+                  >
+                    <Briefcase size={14} /> Open CEO Control Center
+                  </button>
+                </div>
+
+                {/* Section 1: In-Progress Directives */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-base font-bold text-gray-900 dark:text-white">Active In-Progress Directives</h3>
+                    <span className="text-xs text-gray-400 font-medium">Tracking sequential agent stages</span>
+                  </div>
+
+                  {inProgressTasks.length === 0 ? (
+                    <div className="p-10 border border-dashed border-gray-200 dark:border-[#251B38] rounded-3xl text-center bg-white dark:bg-[#120E1E] space-y-3">
+                      <Play size={36} className="mx-auto text-gray-400 opacity-60" />
+                      <h4 className="text-sm font-bold text-gray-900 dark:text-white">No Active Directives In Progress</h4>
+                      <p className="text-xs text-gray-500 max-w-md mx-auto">
+                        All directives have either completed or have not yet been started. Enter a new task in Dashboard or CEO Agent to initiate execution.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {inProgressTasks.map((t) => {
+                        const dels = [...(t.delegations || [])].sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0));
+                        const activeDel = dels.find((d: any) => d.status === 'READY' || d.status === 'RUNNING' || d.status === 'AWAITING_APPROVAL');
+                        const compCount = dels.filter((d: any) => d.status === 'COMPLETED').length;
+
+                        return (
+                          <div key={t.id} className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-3xl p-6 shadow-sm space-y-5">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-[#8B5CF6]/15 text-[#8B5CF6]">
+                                    Directive #{t.id}
+                                  </span>
+                                  <h4 className="text-lg font-black text-gray-900 dark:text-white">{t.title}</h4>
+                                </div>
+                                <p className="text-xs text-gray-500 font-medium">
+                                  Current Active Stage: <strong className="text-[#8B5CF6]">{activeDel ? `${activeDel.agent} Agent (Step ${activeDel.order_index || 1} of ${dels.length})` : 'Awaiting CEO Plan Approval'}</strong>
+                                </p>
+                              </div>
+
+                              <div className="flex items-center gap-3">
+                                {activeDel ? (
+                                  <button
+                                    onClick={() => {
+                                      setSelectedTaskId(t.id);
+                                      setActiveTab(`${activeDel.agent} Agent`);
+                                    }}
+                                    className="px-5 py-2.5 bg-[#00DF89] hover:bg-[#00DF89]/90 text-gray-950 font-black rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-[#00DF89]/20 transition-all cursor-pointer"
+                                  >
+                                    <Play size={14} fill="currentColor" /> Jump to {activeDel.agent} Agent &rarr;
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => {
+                                      setSelectedTaskId(t.id);
+                                      setActiveTab('CEO Agent');
+                                    }}
+                                    className="px-5 py-2.5 bg-[#8B5CF6] text-white font-bold rounded-xl text-xs flex items-center gap-1.5"
+                                  >
+                                    Review in CEO Agent &rarr;
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Progress Bar */}
+                            <div className="space-y-1.5">
+                              <div className="flex justify-between text-xs font-bold text-gray-400">
+                                <span>Pipeline Progress ({compCount} of {dels.length} stages completed)</span>
+                                <span className="text-[#00DF89]">{t.progress || 0}%</span>
+                              </div>
+                              <div className="w-full h-2.5 bg-gray-100 dark:bg-[#1C162E] rounded-full overflow-hidden border border-gray-200 dark:border-[#251B38]">
+                                <div className="h-full bg-gradient-to-r from-[#8B5CF6] to-[#00DF89] rounded-full transition-all duration-500" style={{ width: `${Math.max(t.progress || 0, 5)}%` }} />
+                              </div>
+                            </div>
+
+                            {/* Sequential Stage Cards */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-2">
+                              {dels.map((del: any, idx: number) => {
+                                const isComp = del.status === 'COMPLETED';
+                                const isAct = del.status === 'READY' || del.status === 'RUNNING' || del.status === 'AWAITING_APPROVAL';
+                                return (
+                                  <div 
+                                    key={idx}
+                                    onClick={() => {
+                                      if (!del.status.includes('BLOCKED')) {
+                                        setSelectedTaskId(t.id);
+                                        setActiveTab(`${del.agent} Agent`);
+                                      }
+                                    }}
+                                    className={`p-3.5 rounded-2xl border transition-all ${
+                                      isComp ? 'bg-emerald-500/10 border-emerald-500/30' :
+                                      isAct ? 'bg-[#8B5CF6]/10 border-[#8B5CF6] shadow-sm shadow-[#8B5CF6]/15 cursor-pointer' :
+                                      'bg-gray-50 dark:bg-[#1C162E] border-gray-200 dark:border-[#2D234A] opacity-60'
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between mb-1.5">
+                                      <span className="text-[10px] font-extrabold uppercase text-gray-400">Step {del.order_index || idx + 1}</span>
+                                      {getStatusBadge(del.status)}
+                                    </div>
+                                    <p className="text-xs font-bold text-gray-900 dark:text-white">{del.agent} Agent</p>
+                                    <p className="text-[11px] text-gray-500 line-clamp-1 mt-0.5">{del.task_description}</p>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Section 2: Step-by-Step Telemetry */}
+                <div className="space-y-4 pt-4">
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900 dark:text-white">Live Execution Audit Stream</h3>
+                    <p className="text-xs text-gray-500">Immutable ledger of all agent task calls and founder approvals.</p>
+                  </div>
+
+                  <div className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-3xl overflow-hidden shadow-sm">
+                    <table className="w-full text-left text-xs font-sans">
+                      <thead className="bg-gray-50 dark:bg-[#1C162E] border-b border-gray-200 dark:border-[#251B38] text-[10px] uppercase font-bold text-gray-400">
+                        <tr>
+                          <th className="p-4">Timestamp</th>
+                          <th className="p-4">Agent</th>
+                          <th className="p-4">Action Type</th>
+                          <th className="p-4">Summary</th>
+                          <th className="p-4">Security Level</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100 dark:divide-[#251B38]/50">
+                        {auditLogs.slice(0, 10).map((log) => (
+                          <tr key={log.id} className="hover:bg-gray-50/50 dark:hover:bg-[#1C162E]/50 transition-colors">
+                            <td className="p-4 font-mono text-[11px] text-gray-400">{new Date(log.created_at).toLocaleTimeString()}</td>
+                            <td className="p-4 font-bold text-gray-900 dark:text-white">{log.agent_name}</td>
+                            <td className="p-4">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold ${
+                                log.action_type === 'APPROVAL' ? 'bg-emerald-500/15 text-emerald-500' :
+                                log.action_type === 'CONSEQUENTIAL_ACTION' ? 'bg-amber-500/15 text-amber-500' :
+                                'bg-[#8B5CF6]/15 text-[#8B5CF6]'
+                              }`}>
+                                {log.action_type}
+                              </span>
+                            </td>
+                            <td className="p-4 text-gray-700 dark:text-gray-300 font-medium">{log.summary}</td>
+                            <td className="p-4 text-emerald-500 font-bold flex items-center gap-1">
+                              <ShieldCheck size={14} /> Verified
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })()}
+
+          {/* APPROVALS TAB */}
+          {activeTab === 'Approvals' && (() => {
+            const pendingPlanTasks = tasksList.filter(t => t.status === 'AWAITING_PLAN_APPROVAL' || t.status === 'CEO_ANALYZING');
+            const pendingDelegations = tasksList.flatMap(t => 
+              (t.delegations || [])
+                .filter((d: any) => d.status === 'AWAITING_APPROVAL')
+                .map((d: any) => ({ ...d, taskTitle: t.title, taskId: t.id }))
+            );
+
+            return (
+              <motion.div
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                className="space-y-6"
+              >
+                <div>
+                  <h2 className="text-2xl font-bold tracking-tight">Founder Governance & Approvals</h2>
+                  <p className="text-xs text-gray-500 mt-1">Human-in-the-loop authorization gates for CEO plans, agent deliverables, and consequential actions.</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Level A Approvals */}
+                  <div className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-3xl p-6 space-y-4 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                        <ShieldCheck size={16} className="text-[#8B5CF6]" /> Level A: CEO Strategic Plans
+                      </h3>
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#8B5CF6]/15 text-[#8B5CF6]">
+                        {pendingPlanTasks.length} Pending
+                      </span>
+                    </div>
+
+                    {pendingPlanTasks.length === 0 ? (
+                      <p className="text-xs text-gray-400 py-6 text-center">No CEO plans currently awaiting Level A approval.</p>
+                    ) : (
+                      pendingPlanTasks.map((t) => (
+                        <div key={t.id} className="p-4 rounded-2xl bg-gray-50 dark:bg-[#1C162E] border border-gray-200 dark:border-[#2D234A] space-y-3">
+                          <h4 className="font-bold text-xs text-gray-900 dark:text-white">{t.title}</h4>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-amber-500 font-bold">Awaiting Founder Approval</span>
+                            <button
+                              onClick={() => {
+                                setSelectedTaskId(t.id);
+                                setActiveTab('CEO Agent');
+                              }}
+                              className="px-4 py-1.5 bg-[#8B5CF6] text-white font-bold rounded-xl text-xs"
+                            >
+                              Review Plan &rarr;
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Level B Approvals */}
+                  <div className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-3xl p-6 space-y-4 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                        <CheckCircle2 size={16} className="text-emerald-500" /> Level B: Agent Deliverables
+                      </h3>
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-500">
+                        {pendingDelegations.length} Pending
+                      </span>
+                    </div>
+
+                    {pendingDelegations.length === 0 ? (
+                      <p className="text-xs text-gray-400 py-6 text-center">No agent deliverables currently awaiting Level B approval.</p>
+                    ) : (
+                      pendingDelegations.map((d: any) => (
+                        <div key={d.id} className="p-4 rounded-2xl bg-gray-50 dark:bg-[#1C162E] border border-gray-200 dark:border-[#2D234A] space-y-3">
+                          <div>
+                            <span className="text-[10px] font-bold text-[#8B5CF6]">{d.agent} Agent</span>
+                            <h4 className="font-bold text-xs text-gray-900 dark:text-white">{d.taskTitle}</h4>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-emerald-500 font-bold">Deliverable Ready</span>
+                            <button
+                              onClick={() => {
+                                setSelectedTaskId(d.taskId);
+                                setActiveTab(`${d.agent} Agent`);
+                              }}
+                              className="px-4 py-1.5 bg-[#00DF89] text-gray-950 font-black rounded-xl text-xs"
+                            >
+                              Inspect & Approve &rarr;
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })()}
+
+          {/* MONITORING TAB */}
+          {activeTab === 'Monitoring' && (
             <motion.div
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -15 }}
-              className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-2xl p-12 text-center shadow-sm"
+              className="space-y-6"
             >
-              <Bot className="mx-auto text-founder-primary/40 mb-4 animate-bounce" size={48} />
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">{activeTab} Workspace</h3>
-              <p className="text-gray-500 dark:text-founder-textMuted max-w-sm mx-auto">This section is synced with the CEO Agent orchestration core.</p>
+              <div>
+                <h2 className="text-2xl font-bold tracking-tight">System Health & Telemetry</h2>
+                <p className="text-xs text-gray-500 mt-1">Autonomous worker uptime, latency, and resource metrics across all 5 agents.</p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-2xl p-5 shadow-sm space-y-2">
+                  <p className="text-[10px] font-bold uppercase text-gray-400">System Uptime</p>
+                  <p className="text-2xl font-black text-emerald-500">99.98%</p>
+                  <p className="text-[10px] text-gray-400">All 5 Agent daemons healthy</p>
+                </div>
+                <div className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-2xl p-5 shadow-sm space-y-2">
+                  <p className="text-[10px] font-bold uppercase text-gray-400">Avg Orchestration Latency</p>
+                  <p className="text-2xl font-black text-[#8B5CF6]">320 ms</p>
+                  <p className="text-[10px] text-gray-400">DAG traversal time</p>
+                </div>
+                <div className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-2xl p-5 shadow-sm space-y-2">
+                  <p className="text-[10px] font-bold uppercase text-gray-400">Directives Processed</p>
+                  <p className="text-2xl font-black text-[#3B82F6]">{tasksList.length}</p>
+                  <p className="text-[10px] text-gray-400">Sequential multi-agent runs</p>
+                </div>
+                <div className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-2xl p-5 shadow-sm space-y-2">
+                  <p className="text-[10px] font-bold uppercase text-gray-400">Audit Trail Events</p>
+                  <p className="text-2xl font-black text-amber-500">{auditLogs.length}</p>
+                  <p className="text-[10px] text-gray-400">Immutable records logged</p>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* INTEGRATIONS TAB */}
+          {activeTab === 'Integrations' && (
+            <motion.div
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              className="space-y-6"
+            >
+              <div>
+                <h2 className="text-2xl font-bold tracking-tight">Connected Integrations & Tools</h2>
+                <p className="text-xs text-gray-500 mt-1">External channels and adapters connected to FounderOS.</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-2xl p-5 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-sm text-gray-900 dark:text-white">LinkedIn API</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-500">CONNECTED</span>
+                  </div>
+                  <p className="text-xs text-gray-500">Allows Marketing Agent to dispatch authorized recruiting and announcement posts.</p>
+                </div>
+                <div className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-2xl p-5 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-sm text-gray-900 dark:text-white">Telegram Broadcast Bot</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-500">CONNECTED</span>
+                  </div>
+                  <p className="text-xs text-gray-500">Enables real-time founder alerts and channel broadcasts.</p>
+                </div>
+                <div className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-2xl p-5 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-sm text-gray-900 dark:text-white">Google Gemini LLM</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-500">ACTIVE</span>
+                  </div>
+                  <p className="text-xs text-gray-500">Powers all 5 autonomous agent models, intent classification, and reasoning.</p>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* SETTINGS TAB */}
+          {activeTab === 'Settings' && (
+            <motion.div
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              className="space-y-6"
+            >
+              <div>
+                <h2 className="text-2xl font-bold tracking-tight">System & Profile Settings</h2>
+                <p className="text-xs text-gray-500 mt-1">Manage founder preferences and security configuration.</p>
+              </div>
+
+              <div className="bg-white dark:bg-[#120E1E] border border-gray-200 dark:border-[#251B38] rounded-3xl p-6 shadow-sm space-y-4 max-w-xl">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300">Founder Name</label>
+                  <input 
+                    type="text" 
+                    value={userName} 
+                    onChange={(e) => setUserName(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-[#251B38] bg-gray-50 dark:bg-[#1C162E] text-xs font-medium"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300">Execution Mode</label>
+                  <p className="text-xs text-gray-500">Sequential DAG (Agent 1 &rarr; Agent 2 &rarr; Agent 3 &rarr; Agent 4 with Level A/B/C Gates)</p>
+                </div>
+                <div className="pt-2">
+                  <span className="text-xs font-bold text-emerald-500 flex items-center gap-1.5">
+                    <ShieldCheck size={16} /> Autonomous System Fully Operational
+                  </span>
+                </div>
+              </div>
             </motion.div>
           )}
 
